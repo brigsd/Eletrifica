@@ -236,7 +236,7 @@ def layer_group(filename, colour, z, box):
             f"{m.group(1)}</g>")
 
 
-def render_view(angle, label_all=False):
+def render_view(angle, label_all=False, only=None):
     poly = outline()
     parts = pads_by_part()
     xs_p = [q[0] for q in poly]; ys_p = [q[1] for q in poly]
@@ -271,6 +271,8 @@ def render_view(angle, label_all=False):
         pins = parts.get(key)
         if not pins:
             print("sem pads:", key)
+            continue
+        if only is not None and ref != only:
             continue
         body = BODIES[ref]
         cx, cy, horiz = placement(pins, body)
@@ -333,10 +335,11 @@ def render_view(angle, label_all=False):
             + "".join(part_faces) + "".join(text) + "</svg>")
 
 
-def render_plan():
-    """Top-down check: each part body drawn translucent over the silkscreen.
-    If a body does not sit on its own silkscreen outline, the placement is wrong."""
-    parts = pads_by_part()
+def render_plan(geom=None, only=None, width_px=22):
+    """Top-down check: part bodies drawn translucent over the silkscreen.
+    A body that does not land on its own silkscreen outline is misplaced.
+    `only` restricts the drawing to a single reference; use "" for the bare board."""
+    geom = geom if geom is not None else parts_geometry()
     box = art_bounds()
     (bx0, by0), (bx1, by1) = box
     flip = by0 + by1
@@ -346,7 +349,7 @@ def render_plan():
         return x, flip - y
 
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{bx0:.2f} {by0:.2f} '
-           f'{w:.2f} {h:.2f}" width="{w * 22:.0f}" height="{h * 22:.0f}">'
+           f'{w:.2f} {h:.2f}" width="{w * width_px:.0f}" height="{h * width_px:.0f}">'
            f'<rect x="{bx0:.2f}" y="{by0:.2f}" width="{w:.2f}" height="{h:.2f}" fill="white"/>']
 
     for fn, colour in (("Gerber_TopLayer.GTL", "#c9d6e8"),
@@ -357,17 +360,16 @@ def render_plan():
         if m:
             out.append(m.group(1))
 
-    for key, ref in REFS.items():
-        pins = parts.get(key)
-        if not pins:
+    for part in geom:
+        if only is not None and part["ref"] != only:
             continue
+        ref, cx, cy, horiz = part["ref"], part["cx"], part["cy"], part["horiz"]
         body = BODIES[ref]
-        cx, cy, horiz = placement(pins, body)
         if body["kind"] == "cyl":
             px, py = to_svg(cx, cy)
             out.append(f'<circle cx="{px:.2f}" cy="{py:.2f}" r="{body["dia"] / 2:.2f}" '
                        f'fill="#e0362c" fill-opacity="0.30" stroke="#b0231a" '
-                       f'stroke-width="0.15"/>')
+                       f'stroke-width="0.18"/>')
         else:
             if body["kind"] == "axial":
                 bw, bd = body["body"], body["dia"]
@@ -378,16 +380,124 @@ def render_plan():
             px, py = to_svg(cx - bw / 2, cy + bd / 2)
             out.append(f'<rect x="{px:.2f}" y="{py:.2f}" width="{bw:.2f}" '
                        f'height="{bd:.2f}" fill="#e0362c" fill-opacity="0.30" '
-                       f'stroke="#b0231a" stroke-width="0.15"/>')
+                       f'stroke="#b0231a" stroke-width="0.18"/>')
         lx, ly = to_svg(cx, cy)
-        out.append(f'<text x="{lx:.2f}" y="{ly + 0.7:.2f}" font-size="2" '
-                   f'font-family="DejaVu Sans" font-weight="bold" text-anchor="middle" '
-                   f'fill="none" stroke="#ffffff" stroke-width="0.8">{ref}</text>')
-        out.append(f'<text x="{lx:.2f}" y="{ly + 0.7:.2f}" font-size="2" '
-                   f'font-family="DejaVu Sans" font-weight="bold" text-anchor="middle" '
-                   f'fill="#8a1008">{ref}</text>')
+        for fill, stroke, sw in (("none", "#ffffff", 0.8), ("#8a1008", "none", 0)):
+            extra = f' stroke="{stroke}" stroke-width="{sw}"' if stroke != "none" else ""
+            out.append(f'<text x="{lx:.2f}" y="{ly + 0.7:.2f}" font-size="2" '
+                       f'font-family="DejaVu Sans" font-weight="bold" '
+                       f'text-anchor="middle" fill="{fill}"{extra}>{ref}</text>')
     out.append("</svg>")
     return "".join(out)
+
+
+# ------------------------------------------------- one part at a time
+def parts_geometry():
+    """Every part reduced to plain boxes and cylinders, so the isometric, plan
+    and elevation views all draw from one single description."""
+    parts = pads_by_part()
+    out = []
+    for key, ref in REFS.items():
+        pins = parts.get(key)
+        if not pins:
+            continue
+        body = BODIES[ref]
+        cx, cy, horiz = placement(pins, body)
+        kind = body["kind"]
+        solids = []
+        if kind == "cyl":
+            solids.append(dict(shape="cyl", cx=cx, cy=cy, z=THICK,
+                               dia=body["dia"], h=body["h"], colour=body["colour"]))
+        elif kind == "axial":
+            w, d = (body["body"], body["dia"]) if horiz else (body["dia"], body["body"])
+            solids.append(dict(shape="box", cx=cx, cy=cy, z=THICK, w=w, d=d,
+                               h=body["dia"], colour=body["colour"]))
+        elif kind == "to220":
+            w, d = (body["w"], body["d"]) if horiz else (body["d"], body["w"])
+            solids.append(dict(shape="box", cx=cx, cy=cy, z=THICK + 2.5, w=w, d=d,
+                               h=body["h"], colour=body["colour"]))
+        elif kind == "module":
+            w, d = (body["w"], body["d"]) if horiz else (body["d"], body["w"])
+            for px, py in pins.values():
+                solids.append(dict(shape="box", cx=px, cy=py, z=THICK, w=0.7, d=0.7,
+                                   h=body["stand"], colour="#b8b8b8"))
+            solids.append(dict(shape="box", cx=cx, cy=cy, z=THICK + body["stand"],
+                               w=w, d=d, h=body["h"], colour="#1d5c34"))
+            tw, td, th = body["top"]
+            if not horiz:
+                tw, td = td, tw
+            solids.append(dict(shape="box", cx=cx, cy=cy,
+                               z=THICK + body["stand"] + body["h"],
+                               w=tw, d=td, h=th, colour=body["colour"]))
+        else:
+            w, d = (body["w"], body["d"]) if horiz else (body["d"], body["w"])
+            solids.append(dict(shape="box", cx=cx, cy=cy, z=THICK, w=w, d=d,
+                               h=body["h"], colour=body["colour"]))
+        top_z = max(sd["z"] + sd.get("h", 0) for sd in solids)
+        out.append(dict(ref=ref, cx=cx, cy=cy, horiz=horiz, pins=pins,
+                        solids=solids, top=top_z))
+    return out
+
+
+# camera axes for the four straight-on side views
+ELEVATIONS = {
+    "frente": dict(title="VISTA FRONTAL  (olhando de Y-)",
+                   sx=lambda x, y: x, depth=lambda x, y: -y),
+    "tras":   dict(title="VISTA TRASEIRA  (olhando de Y+)",
+                   sx=lambda x, y: -x, depth=lambda x, y: y),
+    "esq":    dict(title="VISTA ESQUERDA  (olhando de X-)",
+                   sx=lambda x, y: y, depth=lambda x, y: -x),
+    "dir":    dict(title="VISTA DIREITA  (olhando de X+)",
+                   sx=lambda x, y: -y, depth=lambda x, y: x),
+}
+
+
+def render_elevation(which, geom, only=None, width=560, height=260):
+    """Straight-on side view: the camera sits at board level, not above it.
+    Heights read true here, which an isometric view can never give you."""
+    cam = ELEVATIONS[which]
+    poly = outline()
+    xs = [cam["sx"](x, y) for x, y in poly]
+    bx0, bx1 = min(xs), max(xs)
+
+    items = []
+    # the board itself, seen edge-on
+    items.append((-1e9, f'<rect x="{bx0:.2f}" y="{-THICK:.2f}" width="{bx1 - bx0:.2f}" '
+                        f'height="{THICK:.2f}" fill="#1f6b3a" stroke="#0d3a1e" '
+                        f'stroke-width="0.15"/>'))
+    for part in geom:
+        dim = only is not None and part["ref"] != only
+        for sd in part["solids"]:
+            half = (sd["dia"] / 2 if sd["shape"] == "cyl"
+                    else (sd["w"] if which in ("frente", "tras") else sd["d"]) / 2)
+            cxs = cam["sx"](sd["cx"], sd["cy"])
+            x0 = cxs - half
+            colour = sd["colour"]
+            opacity = 0.12 if dim else 1.0
+            items.append((cam["depth"](sd["cx"], sd["cy"]),
+                          f'<rect x="{x0:.2f}" y="{-(sd["z"] + sd["h"]):.2f}" '
+                          f'width="{half * 2:.2f}" height="{sd["h"]:.2f}" '
+                          f'fill="{colour}" fill-opacity="{opacity}" '
+                          f'stroke="#000000" stroke-opacity="{opacity * 0.45:.2f}" '
+                          f'stroke-width="0.12"/>'))
+        if not dim:
+            cxs = cam["sx"](part["cx"], part["cy"])
+            items.append((1e9, f'<text x="{cxs:.2f}" y="{-(part["top"] + 1.4):.2f}" '
+                               f'font-size="2.6" font-family="DejaVu Sans" '
+                               f'font-weight="bold" text-anchor="middle" '
+                               f'fill="#1a2730">{part["ref"]}</text>'))
+
+    top_z = max([p["top"] for p in geom] + [THICK]) + 6
+    pad = 2
+    vx, vw = bx0 - pad, (bx1 - bx0) + 2 * pad
+    vy, vh = -top_z, top_z + THICK + pad
+    body = "".join(el for _, el in sorted(items, key=lambda it: it[0]))
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vx:.2f} {vy:.2f} '
+            f'{vw:.2f} {vh:.2f}" width="{width}" height="{height}">'
+            f'<rect x="{vx:.2f}" y="{vy:.2f}" width="{vw:.2f}" height="{vh:.2f}" '
+            f'fill="#fafbfc"/>'
+            f'<line x1="{vx:.2f}" y1="0" x2="{vx + vw:.2f}" y2="0" '
+            f'stroke="#c7d0d6" stroke-width="0.12"/>{body}</svg>')
 
 
 def nest(svg, x, y, w, h):
@@ -463,6 +573,41 @@ def render_sheet():
     return "".join(out)
 
 
+def render_step(geom, only, title, subtitle):
+    """One page of the placement walk-through: the bare board plus a single
+    part, seen from the top and from all four sides."""
+    W, H = 1900, 1500
+    out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
+           f'viewBox="0 0 {W} {H}"><rect width="{W}" height="{H}" fill="#ffffff"/>',
+           caption(36, 46, title, 30),
+           caption(36, 78, subtitle, 19, "normal", "#5a6b76")]
+
+    pw, ph = 1180, 920
+    out.append(caption(36, 118, "TOPO", 21))
+    out.append(f'<rect x="36" y="130" width="{pw}" height="{ph}" fill="none" '
+               f'stroke="#c7d0d6" stroke-width="2"/>')
+    out.append(nest(render_plan(geom, only), 36, 130, pw, ph))
+
+    ix = 36 + pw + 30
+    iw, ih = 600, 470
+    out.append(caption(ix, 118, "PERSPECTIVA", 21))
+    out.append(f'<rect x="{ix}" y="130" width="{iw}" height="{ih}" fill="#fafbfc" '
+               f'stroke="#c7d0d6" stroke-width="2"/>')
+    out.append(nest(render_view(0, label_all=True, only=only), ix, 130, iw, ih))
+
+    ey, eh = 1090, 170
+    for i, which in enumerate(("frente", "tras", "esq", "dir")):
+        col, row = i % 2, i // 2
+        x = 36 + col * (930)
+        y = ey + row * (eh + 52)
+        out.append(caption(x, y - 10, ELEVATIONS[which]["title"], 19))
+        out.append(f'<rect x="{x}" y="{y}" width="900" height="{eh}" fill="none" '
+                   f'stroke="#c7d0d6" stroke-width="2"/>')
+        out.append(nest(render_elevation(which, geom, only), x, y, 900, eh))
+    out.append("</svg>")
+    return "".join(out)
+
+
 def save(path, svg):
     path.write_text(svg)
     try:
@@ -483,10 +628,28 @@ def main():
                     help="vista de topo com os corpos sobre a serigrafia, para conferir")
     ap.add_argument("--sheet", action="store_true",
                     help="prancha com a vista de topo e quatro angulos")
+    ap.add_argument("--steps", action="store_true",
+                    help="uma pagina por peca: placa nua, depois cada peca sozinha")
     args = ap.parse_args()
 
     OUT.mkdir(exist_ok=True)
     save(OUT / "board-3d.svg", render_view(0))
+    if args.steps:
+        geom = parts_geometry()
+        order = ["U1", "DRV1", "DRV2", "M1", "M2", "J1", "CN1", "U2", "Q1",
+                 "C1", "C2", "C15", "C3", "C4", "C14", "R1", "R2", "R3", "D8"]
+        geom = sorted(geom, key=lambda g: order.index(g["ref"]))
+        steps = OUT / "posicionamento"
+        steps.mkdir(exist_ok=True)
+        save(steps / "00-placa-nua.svg",
+             render_step(geom, "", "PASSO 0 - PLACA NUA",
+                         "So o cobre e a serigrafia. Nenhuma peca colocada ainda."))
+        for i, part in enumerate(geom, start=1):
+            ref = part["ref"]
+            save(steps / f"{i:02d}-{ref}.svg",
+                 render_step(geom, ref, f"PASSO {i} - {ref}",
+                             "Placa nua mais uma unica peca, para conferir a posicao "
+                             "sem as outras atrapalhando."))
     if args.sheet:
         save(OUT / "board-views.svg", render_sheet())
     if args.plan:

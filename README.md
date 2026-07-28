@@ -25,8 +25,21 @@ Vista de topo com os corpos sobre a serigrafia (para conferir posicionamento) e
 o mesmo conjunto visto de quatro ângulos.
 
 ```bash
-python3 tools/render_3d.py --sheet --plan --views
+python3 tools/render_3d.py --sheet --plan --views --steps
 ```
+
+### Conferência peça por peça
+
+`--steps` grava `docs/posicionamento/`: uma página por peça, começando pela placa
+nua. Cada página mostra a **placa sozinha mais uma única peça**, para conferir a
+posição sem as outras atrapalhando — vista de topo sobre a serigrafia, uma
+perspectiva, e as **quatro vistas laterais ortográficas** (frente, trás, esquerda,
+direita), com a câmera na altura da placa. Nas laterais a altura sai verdadeira,
+coisa que nenhuma vista isométrica dá. As demais peças ficam fantasmas em 12 %
+só como referência.
+
+Foi assim que apareceram os dois detalhes anotados na prancha: o eletrolítico
+por baixo do driver A4988 e o corpo do jack passando da borda.
 
 As **posições** de todas as peças saem do Gerber, tiradas do centro dos pads de
 cada uma. As **alturas e formatos dos corpos não saem do Gerber** — um Gerber não
@@ -54,6 +67,7 @@ MOSFET. Alimentação de 12 V com regulação para 5 V por LM7805.
 | `hardware/esp32-cnc-laser.kicad_pro` | Projeto KiCad |
 | `docs/board-views.svg` · `.png` | Prancha: topo + quatro ângulos |
 | `docs/board-plan-check.*` | Vista de topo com os corpos sobre a serigrafia |
+| `docs/posicionamento/` | Uma página por peça: topo, perspectiva e 4 laterais |
 | `docs/board-3d-000/090/180/270.*` | Cada ângulo separado |
 | `docs/layout.svg` · `.png` | Desenho do layout (as duas faces) |
 | `docs/layout-top.*` · `layout-bottom.*` | Layout de cada face separadamente |
