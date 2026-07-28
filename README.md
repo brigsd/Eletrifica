@@ -1,6 +1,6 @@
 # Controladora CNC / Laser com ESP32
 
-> ### ▶ [**Abrir o visualizador 3D interativo**](https://brigsd.github.io/Achievements/)
+> ### ▶ [**Abrir o visualizador 3D interativo**](https://brigsd.github.io/Eletrifica/)
 > Gire a placa, oculte as peças que quiser pelo menu lateral e **dê dois cliques
 > em qualquer componente** para ver o que ele faz e em quais nets ele está ligado.
 
@@ -30,9 +30,9 @@ mecânico. Ambos estão em [`docs/analise.md`](docs/analise.md).
 
 ## O visualizador 3D
 
-[![Visualizador](docs/board-top.png)](https://brigsd.github.io/Achievements/)
+[![Visualizador](docs/board-top.png)](https://brigsd.github.io/Eletrifica/)
 
-**→ [brigsd.github.io/Achievements](https://brigsd.github.io/Achievements/)**
+**→ [brigsd.github.io/Eletrifica](https://brigsd.github.io/Eletrifica/)**
 
 - **Menu lateral** — liga e desliga cada peça, ou um grupo inteiro (Controle,
   Eixos, Alimentação, Laser). O botão *Placa* esconde a própria placa, o que
