@@ -3,6 +3,29 @@
 Leia isto antes de assumir qualquer coisa sobre o repositório. O que estiver
 aqui vale mais do que qualquer nome ou URL que apareça no histórico da conversa.
 
+## Este repositório é mexido por mais de um agente
+
+Outras IAs trabalham neste projeto. **O repositório pode estar bem diferente do
+que este arquivo descreve.** Trate o que vem abaixo como intenção de projeto,
+não como inventário.
+
+Antes de agir, olhe o estado real:
+
+```bash
+git log --oneline -15        # o que mudou desde a ultima vez
+git status --short           # trabalho nao commitado de outra pessoa
+ls tools/ docs/              # os arquivos que existem agora
+```
+
+O que **não** confiar sem conferir: a lista de ferramentas, a lista de arquivos,
+e os números das verificações. O que **continua valendo** mesmo que o resto mude:
+a identidade do repositório, a regra de que tudo é gerado a partir do `gerber/`,
+e a separação entre o que o Gerber prova e o que não existe nele.
+
+Se encontrar trabalho de outro agente pela metade, não desfaça: pergunte ou
+construa em cima. E se alterar algo que este arquivo descreve, **atualize este
+arquivo junto** — é ele que segura o contexto entre sessões e entre agentes.
+
 ## Identidade do repositório
 
 | | |
@@ -50,6 +73,10 @@ Distinga sempre estas duas coisas ao afirmar algo:
 python3 tools/verify_netlist.py   # esquemático x netlist da placa -> 22/22 nets
 python3 tools/check_copper.py     # geometria do cobre x netlist   -> 43/43 ilhas
 ```
+
+Esses números valem para o commit `7491d19`. **Rode as duas antes de afirmar
+que algo está certo** — se alguém mexeu no esquemático ou nos scripts, o
+resultado muda, e é o resultado de agora que conta, não o que está escrito aqui.
 
 `check_copper.py` é independente do arquivo de netlist: rasteriza o cobre pelas
 aberturas do próprio Gerber e só usa coordenadas. Os dois concordando é o que dá
