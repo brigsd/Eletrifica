@@ -17,6 +17,23 @@ python3 tools/render_layout.py --split    # layout.svg, layout-top.svg, layout-b
 
 Também são gravados os `.png` correspondentes.
 
+## Vistas 3D
+
+![Prancha de vistas](docs/board-views.png)
+
+Vista de topo com os corpos sobre a serigrafia (para conferir posicionamento) e
+o mesmo conjunto visto de quatro ângulos.
+
+```bash
+python3 tools/render_3d.py --sheet --plan --views
+```
+
+As **posições** de todas as peças saem do Gerber, tiradas do centro dos pads de
+cada uma. As **alturas e formatos dos corpos não saem do Gerber** — um Gerber não
+tem modelo 3D — então são as dimensões típicas de cada encapsulamento, listadas
+em `BODIES` no script. O desenho serve para entender a placa, não para
+verificação mecânica.
+
 ## Esquemático
 
 ![Esquemático](docs/esp32-cnc-laser.svg)
@@ -35,6 +52,9 @@ MOSFET. Alimentação de 12 V com regulação para 5 V por LM7805.
 |---------|----------|
 | `hardware/esp32-cnc-laser.kicad_sch` | Esquemático KiCad (abre no KiCad 7+) |
 | `hardware/esp32-cnc-laser.kicad_pro` | Projeto KiCad |
+| `docs/board-views.svg` · `.png` | Prancha: topo + quatro ângulos |
+| `docs/board-plan-check.*` | Vista de topo com os corpos sobre a serigrafia |
+| `docs/board-3d-000/090/180/270.*` | Cada ângulo separado |
 | `docs/layout.svg` · `.png` | Desenho do layout (as duas faces) |
 | `docs/layout-top.*` · `layout-bottom.*` | Layout de cada face separadamente |
 | `docs/esp32-cnc-laser.svg` · `.pdf` | Esquemático renderizado |
