@@ -1,7 +1,51 @@
-# Controladora CNC / Laser com ESP32 — layout e esquemático
+# Controladora CNC / Laser com ESP32
 
-Engenharia reversa de uma placa dupla face a partir do seu pacote Gerber: o
-desenho do layout e o esquemático elétrico em KiCad.
+> ### ▶ [**Abrir o visualizador 3D interativo**](https://brigsd.github.io/Achievements/)
+> Gire a placa, oculte as peças que quiser pelo menu lateral e **dê dois cliques
+> em qualquer componente** para ver o que ele faz e em quais nets ele está ligado.
+
+Este repositório é a **engenharia reversa completa de uma placa de circuito
+impresso**, feita a partir do único material disponível: o pacote Gerber que se
+manda para a fábrica.
+
+A placa é uma **controladora de CNC / gravadora a laser de dois eixos**: um
+módulo ESP32 comanda dois drivers de passo A4988 e chaveia um laser por um
+MOSFET. São 70,5 × 54,6 mm, duas camadas, 19 componentes e 43 nets.
+
+Partindo só do Gerber, foram reconstruídos:
+
+| | |
+|---|---|
+| **Netlist** | Todas as 43 ligações, conferidas por dois métodos independentes |
+| **Esquemático** | Projeto KiCad que abre e edita, gerado por script a partir da netlist |
+| **Layout** | Desenho das trilhas, pads e serigrafia das duas faces |
+| **Modelo 3D** | A placa montada, com cada peça posicionada pelo Gerber |
+| **Visualizador** | A página interativa publicada no GitHub Pages |
+| **Análise** | Como o circuito funciona — e um defeito que ele tem |
+
+E, no meio do caminho, **dois problemas apareceram** — um elétrico e um
+mecânico. Ambos estão em [`docs/analise.md`](docs/analise.md).
+
+---
+
+## O visualizador 3D
+
+[![Visualizador](docs/board-top.png)](https://brigsd.github.io/Achievements/)
+
+**→ [brigsd.github.io/Achievements](https://brigsd.github.io/Achievements/)**
+
+- **Menu lateral** — liga e desliga cada peça, ou um grupo inteiro (Controle,
+  Eixos, Alimentação, Laser). O botão *Placa* esconde a própria placa, o que
+  deixa ver o que fica por baixo dos módulos.
+- **Duplo clique numa peça** — abre para que ela serve, com a lista de
+  pino → net daquele componente.
+- **▲ vermelho** no menu marca as peças envolvidas no conflito de folga.
+
+A página é estática e não depende de nada externo: o Three.js está versionado
+em `web/`, junto com a geometria em `web/board.json`, que sai do mesmo modelo
+que gera os desenhos impressos.
+
+---
 
 ## Layout da placa
 
@@ -93,6 +137,7 @@ MOSFET. Alimentação de 12 V com regulação para 5 V por LM7805.
 | `docs/analise.md` | Como o circuito funciona e o que há de errado nele |
 | `docs/bom.md` | Lista de materiais |
 | `docs/netlist.md` | Tabela de todos os nets |
+| `index.html` · `web/` | O visualizador 3D publicado no GitHub Pages |
 | `gerber/` | Pacote Gerber original, que é a fonte de tudo |
 | `tools/` | Scripts que geram e conferem o esquemático |
 
@@ -144,6 +189,7 @@ Precisa de KiCad 7+ (`kicad-cli`) e das dependências em `requirements.txt`.
 pip install -r requirements.txt
 
 python3 tools/render_layout.py --split   # desenhos do layout
+python3 tools/export_web.py         # dados do visualizador 3D
 python3 tools/gen_schematic.py      # escreve hardware/esp32-cnc-laser.kicad_sch
 python3 tools/gen_docs.py           # escreve docs/bom.md e docs/netlist.md
 kicad-cli sch export svg --output docs hardware/esp32-cnc-laser.kicad_sch
