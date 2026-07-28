@@ -830,6 +830,22 @@ def render_step(geom, only, title, subtitle):
            caption(36, 46, title, 30),
            caption(36, 78, subtitle, 19, "normal", "#5a6b76")]
 
+    # warn right where it matters, not only in the report
+    for mod_ref, other, top, gap, delta in clearance_report(geom):
+        if only not in (mod_ref, other) or delta <= 0:
+            continue
+        out.append(f'<rect x="640" y="26" width="1224" height="62" fill="#fdecea" '
+                   f'stroke="#b0231a" stroke-width="2" rx="4"/>')
+        out.append(caption(660, 52,
+                           f"ATENCAO - {other} fica sob {mod_ref}: "
+                           f"topo em {top:.1f} mm contra um vao de {gap:.1f} mm",
+                           21, "bold", "#8a1008"))
+        out.append(caption(660, 76,
+                           "Faltam {:.1f} mm. Alturas sao valores tipicos, nao saem do "
+                           "Gerber -- o Gerber prova a posicao, nao a folga.".format(delta),
+                           17, "normal", "#8a1008"))
+        break
+
     tw, th = 900, 720
     panes = [("TOPO - PECA SOLIDA", render_top(geom, only), 36),
              ("TOPO - RAIO X SOBRE A SERIGRAFIA", render_plan(geom, only), 966)]
