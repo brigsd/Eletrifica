@@ -500,6 +500,62 @@ def render_elevation(which, geom, only=None, width=560, height=260):
             f'stroke="#c7d0d6" stroke-width="0.12"/>{body}</svg>')
 
 
+def render_top(geom=None, only=None, width_px=22):
+    """Straight-down view with the parts drawn solid, the way the assembled
+    board actually looks from above -- no see-through."""
+    geom = geom if geom is not None else parts_geometry()
+    box = art_bounds()
+    (bx0, by0), (bx1, by1) = box
+    flip = by0 + by1
+    w, h = bx1 - bx0, by1 - by0
+    poly = outline()
+
+    out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{bx0:.2f} {by0:.2f} '
+           f'{w:.2f} {h:.2f}" width="{w * width_px:.0f}" height="{h * width_px:.0f}">'
+           f'<rect x="{bx0:.2f}" y="{by0:.2f}" width="{w:.2f}" height="{h:.2f}" '
+           f'fill="#f4f6f8"/>']
+    pts = " ".join(f"{x:.2f},{flip - y:.2f}" for x, y in poly)
+    out.append(f'<polygon points="{pts}" fill="#1f6b3a" stroke="#0d3a1e" '
+               f'stroke-width="0.2"/>')
+    for fn, colour in (("Gerber_TopLayer.GTL", "#57c98a"),
+                       ("Gerber_TopSilkscreenLayer.GTO", "#eef4f0")):
+        g = GerberFile.open(GERBER / fn)
+        svg = str(g.to_svg(fg=colour, bg="none", force_bounds=box))
+        m = re.search(r"(<g transform=.*</g>)\s*</svg>\s*$", svg, re.S)
+        if m:
+            out.append(m.group(1))
+
+    solids = []
+    for part in geom:
+        if only is not None and part["ref"] != only:
+            continue
+        for sd in part["solids"]:
+            solids.append((sd["z"] + sd.get("h", 0), sd))
+    for _, sd in sorted(solids, key=lambda it: it[0]):
+        colour = shade(sd["colour"], 1.0)
+        if sd["shape"] == "cyl":
+            out.append(f'<circle cx="{sd["cx"]:.2f}" cy="{flip - sd["cy"]:.2f}" '
+                       f'r="{sd["dia"] / 2:.2f}" fill="{colour}" stroke="#00000055" '
+                       f'stroke-width="0.12"/>')
+        else:
+            out.append(f'<rect x="{sd["cx"] - sd["w"] / 2:.2f}" '
+                       f'y="{flip - sd["cy"] - sd["d"] / 2:.2f}" '
+                       f'width="{sd["w"]:.2f}" height="{sd["d"]:.2f}" fill="{colour}" '
+                       f'stroke="#00000055" stroke-width="0.12"/>')
+
+    for part in geom:
+        if only is not None and part["ref"] != only:
+            continue
+        lx, ly = part["cx"], flip - part["cy"]
+        for fill, stroke, sw in (("none", "#ffffff", 0.9), ("#12202a", "none", 0)):
+            extra = f' stroke="{stroke}" stroke-width="{sw}"' if stroke != "none" else ""
+            out.append(f'<text x="{lx:.2f}" y="{ly + 0.7:.2f}" font-size="2.1" '
+                       f'font-family="DejaVu Sans" font-weight="bold" '
+                       f'text-anchor="middle" fill="{fill}"{extra}>{part["ref"]}</text>')
+    out.append("</svg>")
+    return "".join(out)
+
+
 def nest(svg, x, y, w, h):
     """Drop a finished drawing into a bigger sheet, keeping its aspect ratio."""
     vb = re.search(r'viewBox="([^"]+)"', svg).group(1)
@@ -574,33 +630,34 @@ def render_sheet():
 
 
 def render_step(geom, only, title, subtitle):
-    """One page of the placement walk-through: the bare board plus a single
-    part, seen from the top and from all four sides."""
-    W, H = 1900, 1500
+    """One page of the placement walk-through: the bare board plus a single part,
+    seen from straight above (solid and x-ray), in perspective, and from all
+    four sides at board level."""
+    W, H = 1900, 1600
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
            f'viewBox="0 0 {W} {H}"><rect width="{W}" height="{H}" fill="#ffffff"/>',
            caption(36, 46, title, 30),
            caption(36, 78, subtitle, 19, "normal", "#5a6b76")]
 
-    pw, ph = 1180, 920
-    out.append(caption(36, 118, "TOPO", 21))
-    out.append(f'<rect x="36" y="130" width="{pw}" height="{ph}" fill="none" '
-               f'stroke="#c7d0d6" stroke-width="2"/>')
-    out.append(nest(render_plan(geom, only), 36, 130, pw, ph))
+    tw, th = 900, 720
+    panes = [("TOPO - PECA SOLIDA", render_top(geom, only), 36),
+             ("TOPO - RAIO X SOBRE A SERIGRAFIA", render_plan(geom, only), 966)]
+    for label, svg, x in panes:
+        out.append(caption(x, 118, label, 21))
+        out.append(f'<rect x="{x}" y="130" width="{tw}" height="{th}" fill="none" '
+                   f'stroke="#c7d0d6" stroke-width="2"/>')
+        out.append(nest(svg, x, 130, tw, th))
 
-    ix = 36 + pw + 30
-    iw, ih = 600, 470
-    out.append(caption(ix, 118, "PERSPECTIVA", 21))
-    out.append(f'<rect x="{ix}" y="130" width="{iw}" height="{ih}" fill="#fafbfc" '
+    out.append(caption(36, 900, "PERSPECTIVA", 21))
+    out.append(f'<rect x="36" y="912" width="{tw}" height="380" fill="#fafbfc" '
                f'stroke="#c7d0d6" stroke-width="2"/>')
-    out.append(nest(render_view(0, label_all=True, only=only), ix, 130, iw, ih))
+    out.append(nest(render_view(0, label_all=True, only=only), 36, 912, tw, 380))
 
-    ey, eh = 1090, 170
-    for i, which in enumerate(("frente", "tras", "esq", "dir")):
-        col, row = i % 2, i // 2
-        x = 36 + col * (930)
-        y = ey + row * (eh + 52)
-        out.append(caption(x, y - 10, ELEVATIONS[which]["title"], 19))
+    eh = 170
+    slots = {"frente": (966, 912), "tras": (966, 1122),
+             "esq": (36, 1370), "dir": (966, 1370)}
+    for which, (x, y) in slots.items():
+        out.append(caption(x, y - 10, ELEVATIONS[which]["title"], 18))
         out.append(f'<rect x="{x}" y="{y}" width="900" height="{eh}" fill="none" '
                    f'stroke="#c7d0d6" stroke-width="2"/>')
         out.append(nest(render_elevation(which, geom, only), x, y, 900, eh))

@@ -34,7 +34,9 @@ python3 tools/render_3d.py --sheet --plan --views --steps
 nua. Cada página mostra a **placa sozinha mais uma única peça**, para conferir a
 posição sem as outras atrapalhando — vista de topo sobre a serigrafia, uma
 perspectiva, e as **quatro vistas laterais ortográficas** (frente, trás, esquerda,
-direita), com a câmera na altura da placa. Nas laterais a altura sai verdadeira,
+direita), com a câmera na altura da placa. São **duas vistas de topo**: uma com a
+peça sólida, como a placa montada se vê de cima, e outra em raio X sobre a
+serigrafia, para conferir se o corpo cai em cima do próprio contorno. Nas laterais a altura sai verdadeira,
 coisa que nenhuma vista isométrica dá. As demais peças ficam fantasmas em 12 %
 só como referência.
 
@@ -66,7 +68,8 @@ MOSFET. Alimentação de 12 V com regulação para 5 V por LM7805.
 | `hardware/esp32-cnc-laser.kicad_sch` | Esquemático KiCad (abre no KiCad 7+) |
 | `hardware/esp32-cnc-laser.kicad_pro` | Projeto KiCad |
 | `docs/board-views.svg` · `.png` | Prancha: topo + quatro ângulos |
-| `docs/board-plan-check.*` | Vista de topo com os corpos sobre a serigrafia |
+| `docs/board-top.svg` · `.png` | Vista de topo com as peças sólidas |
+| `docs/board-plan-check.*` | Vista de topo em raio X sobre a serigrafia |
 | `docs/posicionamento/` | Uma página por peça: topo, perspectiva e 4 laterais |
 | `docs/board-3d-000/090/180/270.*` | Cada ângulo separado |
 | `docs/layout.svg` · `.png` | Desenho do layout (as duas faces) |
