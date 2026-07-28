@@ -28,6 +28,20 @@ o mesmo conjunto visto de quatro ângulos.
 python3 tools/render_3d.py --sheet --plan --views --steps
 ```
 
+### Módulos como peças próprias
+
+![Módulo ESP32](docs/modulos/U1.png)
+
+Os três módulos (ESP32 e os dois A4988) são modelados como peças em si: contorno
+próprio, barra de pinos própria e o que fica em cima deles. O contorno do ESP32
+**foi medido no desenho que a placa-mãe carrega na serigrafia** para ele —
+51,50 × 27,94 mm, que é a medida real do DevKit V1, e cujo centro fica 2,5 mm
+deslocado do centro dos pinos. `docs/modulos/` traz uma página por módulo.
+
+Modelar os módulos direito fez aparecer um conflito mecânico: os eletrolíticos
+C1 e C2 ficam debaixo dos drivers e, pelas alturas usuais, não passam no vão.
+Ver [`docs/analise.md`](docs/analise.md).
+
 ### Conferência peça por peça
 
 `--steps` grava `docs/posicionamento/`: uma página por peça, começando pela placa
@@ -70,7 +84,8 @@ MOSFET. Alimentação de 12 V com regulação para 5 V por LM7805.
 | `docs/board-views.svg` · `.png` | Prancha: topo + quatro ângulos |
 | `docs/board-top.svg` · `.png` | Vista de topo com as peças sólidas |
 | `docs/board-plan-check.*` | Vista de topo em raio X sobre a serigrafia |
-| `docs/posicionamento/` | Uma página por peça: topo, perspectiva e 4 laterais |
+| `docs/posicionamento/` | Uma página por peça: 2 topos, perspectiva e 4 laterais |
+| `docs/modulos/` | Uma página por módulo, com as medidas e a pinagem |
 | `docs/board-3d-000/090/180/270.*` | Cada ângulo separado |
 | `docs/layout.svg` · `.png` | Desenho do layout (as duas faces) |
 | `docs/layout-top.*` · `layout-bottom.*` | Layout de cada face separadamente |

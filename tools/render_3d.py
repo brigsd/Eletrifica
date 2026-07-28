@@ -39,12 +39,10 @@ PALETTE = {
 
 # w = size along the part's long axis, d = across it, h = height above the board
 BODIES = {
-    "U1":   dict(kind="module", w=48.0, d=25.4, h=1.6, stand=8.5,
-                 top=(18.0, 20.0, 3.0), colour="#20303f", label="ESP32"),
-    "DRV1": dict(kind="module", w=20.3, d=15.5, h=1.6, stand=8.5,
-                 top=(9.0, 9.0, 2.4), colour="#8b1e2d", label="A4988"),
-    "DRV2": dict(kind="module", w=20.3, d=15.5, h=1.6, stand=8.5,
-                 top=(9.0, 9.0, 2.4), colour="#8b1e2d", label="A4988"),
+    # geometry for these three lives in MODULES, below
+    "U1":   dict(kind="module", label="ESP32"),
+    "DRV1": dict(kind="module", label="A4988"),
+    "DRV2": dict(kind="module", label="A4988"),
     # the jack body reaches out over the board edge, well behind its own pins
     "J1":   dict(kind="box", w=14.0, d=9.0, h=11.0, colour="#1b1b1b", label="12V",
                  offset=(-3.6, 0.0)),
@@ -64,6 +62,33 @@ BODIES = {
     "R3":   dict(kind="axial", dia=2.3, body=6.5, colour="#c8a06a"),
     "D8":   dict(kind="cyl", dia=5.0, h=8.6, colour="#cc2222"),
 }
+
+# The three plug-in modules are described as parts in their own right: their own
+# board, their own pin headers, and the bits sitting on top of them. Sizes marked
+# "medido" were read off the outline this board carries in its silkscreen; the
+# rest are the published dimensions of the module.
+MODULES = {
+    "U1": dict(
+        outline=(51.50, 27.94),        # medido na serigrafia da placa-mae
+        centre=(37.14, 39.62),         # medido -- nao coincide com o centro dos pinos
+        pcb="#1c1c22", stand=8.5, pcb_h=1.6, rows=(1, 15),
+        features=[
+            dict(dx=-11.0, dy=0.0, w=25.5, d=18.0, h=3.1, colour="#c2c6cc",
+                 label="ESP32-WROOM-32"),
+            dict(dx=23.0, dy=0.0, w=6.0, d=8.0, h=3.0, colour="#adb2b8", label="USB"),
+            dict(dx=15.5, dy=-9.5, w=4.5, d=3.5, h=1.9, colour="#141414", label="EN"),
+            dict(dx=15.5, dy=9.5, w=4.5, d=3.5, h=1.9, colour="#141414", label="BOOT"),
+        ]),
+    "DRV1": dict(
+        outline=(20.32, 15.24), centre=None,
+        pcb="#8b1e2d", stand=8.5, pcb_h=1.6, rows=(1, 8),
+        features=[
+            dict(dx=0.0, dy=1.0, w=5.2, d=5.2, h=1.0, colour="#26262a", label="A4988"),
+            dict(dx=-6.6, dy=-3.6, w=4.2, d=4.2, h=2.2, colour="#1f4fa8", label="Vref"),
+            dict(dx=6.4, dy=-3.8, w=3.2, d=1.8, h=1.2, colour="#3a3a3a", label=""),
+        ]),
+}
+MODULES["DRV2"] = dict(MODULES["DRV1"])
 
 # silkscreen name + pad count -> reference, matching the schematic
 REFS = {
@@ -290,15 +315,22 @@ def render_view(angle, label_all=False, only=None):
             scene.box(cx, cy, top + 2.5, w, d, body["h"], body["colour"])
             crown = top + 2.5 + body["h"]
         elif kind == "module":
-            w, d = (body["w"], body["d"]) if horiz else (body["d"], body["w"])
-            for px, py in pins.values():
-                scene.box(px, py, top, 0.7, 0.7, body["stand"], "#b8b8b8")
-            scene.box(cx, cy, top + body["stand"], w, d, body["h"], "#1d5c34")
-            tw, td, th = body["top"]
+            mod = MODULES[ref]
+            if mod["centre"]:
+                cx, cy = mod["centre"]
+            ow, od = mod["outline"]
             if not horiz:
-                tw, td = td, tw
-            scene.box(cx, cy, top + body["stand"] + body["h"], tw, td, th, body["colour"])
-            crown = top + body["stand"] + body["h"] + th
+                ow, od = od, ow
+            for px, py in pins.values():
+                scene.box(px, py, top, 0.7, 0.7, mod["stand"], "#b8b8b8")
+            zpcb = top + mod["stand"]
+            scene.box(cx, cy, zpcb, ow, od, mod["pcb_h"], mod["pcb"])
+            for ft in mod["features"]:
+                fx, fy = (ft["dx"], ft["dy"]) if horiz else (-ft["dy"], ft["dx"])
+                fw, fd = (ft["w"], ft["d"]) if horiz else (ft["d"], ft["w"])
+                scene.box(cx + fx, cy + fy, zpcb + mod["pcb_h"], fw, fd, ft["h"],
+                          ft["colour"])
+            crown = zpcb + mod["pcb_h"] + max(f["h"] for f in mod["features"])
         else:
             w, d = (body["w"], body["d"]) if horiz else (body["d"], body["w"])
             scene.box(cx, cy, top, w, d, body["h"], body["colour"])
@@ -365,7 +397,18 @@ def render_plan(geom=None, only=None, width_px=22):
             continue
         ref, cx, cy, horiz = part["ref"], part["cx"], part["cy"], part["horiz"]
         body = BODIES[ref]
-        if body["kind"] == "cyl":
+        if body["kind"] == "module":
+            mod = MODULES[ref]
+            if mod["centre"]:
+                cx, cy = mod["centre"]
+            bw, bd = mod["outline"]
+            if not horiz:
+                bw, bd = bd, bw
+            px, py = to_svg(cx - bw / 2, cy + bd / 2)
+            out.append(f'<rect x="{px:.2f}" y="{py:.2f}" width="{bw:.2f}" '
+                       f'height="{bd:.2f}" fill="#e0362c" fill-opacity="0.30" '
+                       f'stroke="#b0231a" stroke-width="0.18"/>')
+        elif body["kind"] == "cyl":
             px, py = to_svg(cx, cy)
             out.append(f'<circle cx="{px:.2f}" cy="{py:.2f}" r="{body["dia"] / 2:.2f}" '
                        f'fill="#e0362c" fill-opacity="0.30" stroke="#b0231a" '
@@ -417,18 +460,24 @@ def parts_geometry():
             solids.append(dict(shape="box", cx=cx, cy=cy, z=THICK + 2.5, w=w, d=d,
                                h=body["h"], colour=body["colour"]))
         elif kind == "module":
-            w, d = (body["w"], body["d"]) if horiz else (body["d"], body["w"])
+            mod = MODULES[ref]
+            if mod["centre"]:
+                cx, cy = mod["centre"]
+            ow, od = mod["outline"]
+            if not horiz:
+                ow, od = od, ow
             for px, py in pins.values():
                 solids.append(dict(shape="box", cx=px, cy=py, z=THICK, w=0.7, d=0.7,
-                                   h=body["stand"], colour="#b8b8b8"))
-            solids.append(dict(shape="box", cx=cx, cy=cy, z=THICK + body["stand"],
-                               w=w, d=d, h=body["h"], colour="#1d5c34"))
-            tw, td, th = body["top"]
-            if not horiz:
-                tw, td = td, tw
-            solids.append(dict(shape="box", cx=cx, cy=cy,
-                               z=THICK + body["stand"] + body["h"],
-                               w=tw, d=td, h=th, colour=body["colour"]))
+                                   h=mod["stand"], colour="#b8b8b8"))
+            zpcb = THICK + mod["stand"]
+            solids.append(dict(shape="box", cx=cx, cy=cy, z=zpcb,
+                               w=ow, d=od, h=mod["pcb_h"], colour=mod["pcb"]))
+            for ft in mod["features"]:
+                fx, fy = (ft["dx"], ft["dy"]) if horiz else (-ft["dy"], ft["dx"])
+                fw, fd = (ft["w"], ft["d"]) if horiz else (ft["d"], ft["w"])
+                solids.append(dict(shape="box", cx=cx + fx, cy=cy + fy,
+                                   z=zpcb + mod["pcb_h"], w=fw, d=fd, h=ft["h"],
+                                   colour=ft["colour"]))
         else:
             w, d = (body["w"], body["d"]) if horiz else (body["d"], body["w"])
             solids.append(dict(shape="box", cx=cx, cy=cy, z=THICK, w=w, d=d,
@@ -629,6 +678,148 @@ def render_sheet():
     return "".join(out)
 
 
+def module_local(ref, geom):
+    """The module on its own: outline, pins and top features in local coordinates,
+    with the module centre at the origin and its long side along x."""
+    part = next(g for g in geom if g["ref"] == ref)
+    mod = MODULES[ref]
+    cx, cy = mod["centre"] if mod["centre"] else (part["cx"], part["cy"])
+    horiz = part["horiz"]
+    pins = []
+    for num, (px, py) in sorted(part["pins"].items(), key=lambda kv: int(kv[0])):
+        dx, dy = px - cx, py - cy
+        pins.append((int(num), dx if horiz else dy, dy if horiz else -dx))
+    return mod, pins
+
+
+def clearance_report(geom):
+    """Does anything on the board hit the underside of a plug-in module?
+    Both the module standoff and the part heights are assumed values, so this
+    flags what to measure -- it does not prove a collision."""
+    rows = []
+    for ref in MODULES:
+        part = next((g for g in geom if g["ref"] == ref), None)
+        if part is None:
+            continue
+        mod = MODULES[ref]
+        cx, cy = mod["centre"] if mod["centre"] else (part["cx"], part["cy"])
+        ow, od = mod["outline"]
+        if not part["horiz"]:
+            ow, od = od, ow
+        gap = THICK + mod["stand"]          # underside of the module board
+        for other in geom:
+            if other["ref"] == ref or other["ref"] in MODULES:
+                continue
+            if (abs(other["cx"] - cx) < ow / 2 and abs(other["cy"] - cy) < od / 2):
+                rows.append((ref, other["ref"], other["top"], gap,
+                             other["top"] - gap))
+    return rows
+
+
+def render_module_detail(ref, geom):
+    """Datasheet-style page for one module, drawn from its own measurements."""
+    mod, pins = module_local(ref, geom)
+    ow, od = mod["outline"]
+    stand, pcb_h = mod["stand"], mod["pcb_h"]
+    W, H = 1500, 1080
+    out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
+           f'viewBox="0 0 {W} {H}"><rect width="{W}" height="{H}" fill="#ffffff"/>',
+           caption(36, 46, f"MODULO {ref}  -  {BODIES[ref]['label']}", 30),
+           caption(36, 78, f"{ow:.2f} x {od:.2f} mm  -  {len(pins)} pinos  -  "
+                           f"barra de {stand:.1f} mm", 19, "normal", "#5a6b76")]
+
+    def pane(x, y, w, h, title, vb, content):
+        out.append(caption(x, y - 10, title, 20))
+        out.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="#fafbfc" '
+                   f'stroke="#c7d0d6" stroke-width="2"/>')
+        out.append(f'<svg x="{x}" y="{y}" width="{w}" height="{h}" viewBox="{vb}" '
+                   f'preserveAspectRatio="xMidYMid meet">{content}</svg>')
+
+    # ---- plan of the module itself
+    body = [f'<rect x="{-ow / 2:.2f}" y="{-od / 2:.2f}" width="{ow:.2f}" '
+            f'height="{od:.2f}" rx="0.8" fill="{mod["pcb"]}" stroke="#00000066" '
+            f'stroke-width="0.2"/>']
+    for ft in mod["features"]:
+        body.append(f'<rect x="{ft["dx"] - ft["w"] / 2:.2f}" '
+                    f'y="{-ft["dy"] - ft["d"] / 2:.2f}" width="{ft["w"]:.2f}" '
+                    f'height="{ft["d"]:.2f}" fill="{ft["colour"]}" stroke="#00000055" '
+                    f'stroke-width="0.15"/>')
+        if ft["label"]:
+            body.append(f'<text x="{ft["dx"]:.2f}" y="{-ft["dy"] + 0.6:.2f}" '
+                        f'font-size="1.5" font-family="DejaVu Sans" '
+                        f'text-anchor="middle" fill="#ffffff">{ft["label"]}</text>')
+    for num, lx, ly in pins:
+        body.append(f'<circle cx="{lx:.2f}" cy="{-ly:.2f}" r="0.62" fill="#e8c56a" '
+                    f'stroke="#8a6d1f" stroke-width="0.14"/>')
+        side = -1 if ly > 0 else 1
+        body.append(f'<text x="{lx:.2f}" y="{-ly + side * 2.0 + 0.4:.2f}" '
+                    f'font-size="1.35" font-family="DejaVu Sans" text-anchor="middle" '
+                    f'fill="#22303a">{num}</text>')
+    m = 6
+    body.append(f'<line x1="{-ow / 2:.2f}" y1="{od / 2 + 4:.2f}" x2="{ow / 2:.2f}" '
+                f'y2="{od / 2 + 4:.2f}" stroke="#b0231a" stroke-width="0.18"/>')
+    body.append(f'<text x="0" y="{od / 2 + 6.4:.2f}" font-size="2" '
+                f'font-family="DejaVu Sans" font-weight="bold" text-anchor="middle" '
+                f'fill="#8a1008">{ow:.2f} mm</text>')
+    body.append(f'<line x1="{-ow / 2 - 4:.2f}" y1="{-od / 2:.2f}" '
+                f'x2="{-ow / 2 - 4:.2f}" y2="{od / 2:.2f}" stroke="#b0231a" '
+                f'stroke-width="0.18"/>')
+    body.append(f'<text x="{-ow / 2 - 5.2:.2f}" y="0" font-size="2" '
+                f'font-family="DejaVu Sans" font-weight="bold" text-anchor="middle" '
+                f'fill="#8a1008" transform="rotate(-90 {-ow / 2 - 5.2:.2f} 0)">'
+                f'{od:.2f} mm</text>')
+    vb = f"{-ow / 2 - m - 4} {-od / 2 - m} {ow + 2 * m + 8} {od + 2 * m + 6}"
+    pane(36, 130, 900, 560, "PLANTA DO MODULO (visto de cima, fora da placa)", vb,
+         "".join(body))
+
+    # ---- elevation of the module, pins included
+    tallest = max(f["h"] for f in mod["features"])
+    total = stand + pcb_h + tallest
+    ev = [f'<line x1="{-ow / 2 - 3:.2f}" y1="0" x2="{ow / 2 + 3:.2f}" y2="0" '
+          f'stroke="#c7d0d6" stroke-width="0.15"/>']
+    for _, lx, _ in pins:
+        ev.append(f'<rect x="{lx - 0.35:.2f}" y="{-stand:.2f}" width="0.7" '
+                  f'height="{stand:.2f}" fill="#b8b8b8" stroke="#00000044" '
+                  f'stroke-width="0.08"/>')
+    ev.append(f'<rect x="{-ow / 2:.2f}" y="{-(stand + pcb_h):.2f}" width="{ow:.2f}" '
+              f'height="{pcb_h:.2f}" fill="{mod["pcb"]}" stroke="#00000066" '
+              f'stroke-width="0.15"/>')
+    for ft in mod["features"]:
+        ev.append(f'<rect x="{ft["dx"] - ft["w"] / 2:.2f}" '
+                  f'y="{-(stand + pcb_h + ft["h"]):.2f}" width="{ft["w"]:.2f}" '
+                  f'height="{ft["h"]:.2f}" fill="{ft["colour"]}" stroke="#00000055" '
+                  f'stroke-width="0.12"/>')
+    ev.append(f'<text x="{ow / 2 + 2:.2f}" y="{-stand + 0.6:.2f}" font-size="1.7" '
+              f'font-family="DejaVu Sans" fill="#8a1008">{stand:.1f} mm de barra</text>')
+    ev.append(f'<text x="{ow / 2 + 2:.2f}" y="{-total - 0.8:.2f}" font-size="1.7" '
+              f'font-family="DejaVu Sans" fill="#8a1008">{total:.1f} mm no total</text>')
+    pane(36, 760, 900, 240, "ELEVACAO (a barra de pinos faz parte do modulo)",
+         f"{-ow / 2 - 4} {-total - 5} {ow + 30} {total + 8}", "".join(ev))
+
+    # ---- notes
+    nx = 980
+    out.append(caption(nx, 120, "DE ONDE VEM CADA MEDIDA", 20))
+    src = ("medido no contorno serigrafado"
+           if mod["centre"] else "dimensao publicada do modulo")
+    lines = [f"Contorno {ow:.2f} x {od:.2f} mm:", f"  {src}", "",
+             f"Pinos: {len(pins)}, tirados dos pads da placa.",
+             f"Passo de 2,54 mm.", "",
+             "Altura da barra, espessura da placa do",
+             "modulo e altura das pecas de cima nao",
+             "estao no Gerber. Sao os valores usuais",
+             "desse modulo.", ""]
+    if mod["centre"]:
+        lines += ["O centro do contorno nao coincide com",
+                  "o centro dos pinos: o modulo avanca",
+                  "mais para um lado do que para o outro.", ""]
+    y = 158
+    for line in lines:
+        out.append(caption(nx, y, line, 18, "normal", "#3b4a55"))
+        y += 26
+    out.append("</svg>")
+    return "".join(out)
+
+
 def render_step(geom, only, title, subtitle):
     """One page of the placement walk-through: the bare board plus a single part,
     seen from straight above (solid and x-ray), in perspective, and from all
@@ -693,6 +884,15 @@ def main():
     save(OUT / "board-3d.svg", render_view(0))
     if args.steps:
         geom = parts_geometry()
+        mods = OUT / "modulos"
+        mods.mkdir(exist_ok=True)
+        for ref in ("U1", "DRV1", "DRV2"):
+            save(mods / f"{ref}.svg", render_module_detail(ref, geom))
+        print("\n--- folga sob os modulos ---")
+        for mod_ref, other, top, gap, delta in clearance_report(geom):
+            verdict = "COLIDE" if delta > 0 else "passa"
+            print(f"  {other} sob {mod_ref}: altura {top:.1f} mm, "
+                  f"vao {gap:.1f} mm  ->  {verdict} por {abs(delta):.1f} mm")
         order = ["U1", "DRV1", "DRV2", "M1", "M2", "J1", "CN1", "U2", "Q1",
                  "C1", "C2", "C15", "C3", "C4", "C14", "R1", "R2", "R3", "D8"]
         geom = sorted(geom, key=lambda g: order.index(g["ref"]))

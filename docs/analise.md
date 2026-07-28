@@ -124,7 +124,29 @@ não dá boot. A entrada `STEP` do A4988 é de alta impedância e não deve puxa
 pino para cima, então na prática deve funcionar — mas se a placa apresentar boot
 intermitente, é o primeiro lugar para olhar.
 
-### 🔵 7. Observações menores
+### 🟡 7. Os eletrolíticos ficam debaixo dos drivers — e talvez não caibam
+
+Isto apareceu no desenho 3D, não na netlist. `C1` e `C2` (100 µF) estão **dentro
+da área ocupada pelos módulos A4988**, que ficam suspensos sobre a barra de pinos.
+
+| | |
+|---|---|
+| Altura de um 100 µF radial de 6,3 mm | ~11 mm de corpo, 12,6 mm a partir do topo da placa |
+| Face inferior do A4988 sobre barra fêmea de 8,5 mm | 10,1 mm |
+| **Folga** | **−2,5 mm** |
+
+Ou seja, pelas dimensões usuais desses dois componentes, **o capacitor bate no
+módulo**. A altura máxima que passa nesse vão é de cerca de 8,5 mm de corpo.
+
+**Atenção ao grau de confiança:** as duas medidas são valores típicos, não saem
+do Gerber — o Gerber não guarda altura. O que o Gerber prova é só a **posição**:
+os capacitores estão mesmo debaixo dos drivers. Se a placa já foi montada e
+funciona, provavelmente foram usados capacitores baixos, barra mais alta, ou os
+capacitores foram deitados. Vale medir antes de comprar componente.
+
+Rodar `python3 tools/render_3d.py --steps` imprime essa conferência de folga.
+
+### 🔵 8. Observações menores
 
 - `R3` = 10 k no LED de 12 V dá cerca de **1 mA** — funciona com LED moderno, mas fica fraco.
 - O pino 3 do jack DC (contato de comutação) não está ligado.
