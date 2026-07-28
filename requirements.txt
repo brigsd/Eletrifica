@@ -1,0 +1,7 @@
+# Only needed to re-run the tools in tools/; the schematic and the exported
+# SVG/PDF in docs/ are committed and need none of this.
+gerbonara
+cairosvg
+numpy
+scipy
+pillow
