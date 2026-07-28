@@ -1,7 +1,23 @@
-# Esquemático da controladora CNC / Laser com ESP32
+# Controladora CNC / Laser com ESP32 — layout e esquemático
 
-Engenharia reversa de uma placa dupla face a partir do seu pacote Gerber, com o
-esquemático elétrico reconstruído em KiCad.
+Engenharia reversa de uma placa dupla face a partir do seu pacote Gerber: o
+desenho do layout e o esquemático elétrico em KiCad.
+
+## Layout da placa
+
+![Layout](docs/layout.png)
+
+Trilhas da face superior em azul-escuro, da face inferior em azul-claro, pads em
+verde e serigrafia em cinza. Os planos de terra ficam ocultos por padrão para as
+trilhas aparecerem; `--pour` desenha eles em tom claro.
+
+```bash
+python3 tools/render_layout.py --split    # layout.svg, layout-top.svg, layout-bottom.svg
+```
+
+Também são gravados os `.png` correspondentes.
+
+## Esquemático
 
 ![Esquemático](docs/esp32-cnc-laser.svg)
 
@@ -19,6 +35,8 @@ MOSFET. Alimentação de 12 V com regulação para 5 V por LM7805.
 |---------|----------|
 | `hardware/esp32-cnc-laser.kicad_sch` | Esquemático KiCad (abre no KiCad 7+) |
 | `hardware/esp32-cnc-laser.kicad_pro` | Projeto KiCad |
+| `docs/layout.svg` · `.png` | Desenho do layout (as duas faces) |
+| `docs/layout-top.*` · `layout-bottom.*` | Layout de cada face separadamente |
 | `docs/esp32-cnc-laser.svg` · `.pdf` | Esquemático renderizado |
 | `docs/analise.md` | Como o circuito funciona e o que há de errado nele |
 | `docs/bom.md` | Lista de materiais |
@@ -73,6 +91,7 @@ Precisa de KiCad 7+ (`kicad-cli`) e das dependências em `requirements.txt`.
 ```bash
 pip install -r requirements.txt
 
+python3 tools/render_layout.py --split   # desenhos do layout
 python3 tools/gen_schematic.py      # escreve hardware/esp32-cnc-laser.kicad_sch
 python3 tools/gen_docs.py           # escreve docs/bom.md e docs/netlist.md
 kicad-cli sch export svg --output docs hardware/esp32-cnc-laser.kicad_sch
