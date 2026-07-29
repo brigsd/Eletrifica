@@ -106,6 +106,15 @@ Detalhes e as demais observações em `docs/analise.md`.
 
 Dependências em `requirements.txt`, mais o `kicad-cli` do KiCad 7+.
 
+## Código de terceiros
+
+`THIRD_PARTY.md` lista o que no repositório não é deste projeto: o three.js
+versionado em `web/` (MIT) e os símbolos do KiCad embutidos no `.kicad_sch`
+(CC-BY-SA 4.0 com exceção que dispensa o compartilhamento em projetos
+eletrônicos). Se acrescentar qualquer dependência versionada, registre lá.
+
+O projeto ainda não tem licença própria — decisão do dono, não assuma nenhuma.
+
 ## Ao mexer no visualizador
 
 `index.html` na raiz, com Three.js **versionado** em `web/` — a página não busca

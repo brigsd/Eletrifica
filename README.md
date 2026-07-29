@@ -139,6 +139,7 @@ MOSFET. Alimentação de 12 V com regulação para 5 V por LM7805.
 | `docs/netlist.md` | Tabela de todos os nets |
 | `index.html` · `web/` | O visualizador 3D publicado no GitHub Pages |
 | `gerber/` | Pacote Gerber original, que é a fonte de tudo |
+| `THIRD_PARTY.md` | Código de terceiros no repositório, com versão e licença |
 | `tools/` | Scripts que geram e conferem o esquemático |
 
 ## De onde veio cada informação
@@ -199,3 +200,13 @@ kicad-cli sch export pdf --output docs/esp32-cnc-laser.pdf hardware/esp32-cnc-la
 O esquemático é **gerado** a partir do Gerber, não desenhado à mão:
 `gen_schematic.py` lê a netlist da placa e emite o `.kicad_sch`. Corrigir a placa
 é mudar o Gerber e rodar de novo.
+
+## Código de terceiros
+
+Duas coisas aqui não são deste projeto: o **three.js** (MIT), versionado em
+`web/` para o visualizador não depender de CDN, e **doze símbolos do KiCad**
+(CC-BY-SA 4.0 com exceção), embutidos no `.kicad_sch` para ele abrir em
+qualquer máquina. Detalhes e textos de licença em
+[`THIRD_PARTY.md`](THIRD_PARTY.md).
+
+O projeto em si ainda **não tem licença definida**.
