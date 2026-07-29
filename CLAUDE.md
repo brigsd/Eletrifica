@@ -113,7 +113,9 @@ versionado em `web/` (MIT) e os símbolos do KiCad embutidos no `.kicad_sch`
 (CC-BY-SA 4.0 com exceção que dispensa o compartilhamento em projetos
 eletrônicos). Se acrescentar qualquer dependência versionada, registre lá.
 
-O projeto ainda não tem licença própria — decisão do dono, não assuma nenhuma.
+O projeto é **MIT** (`LICENSE`), mas só sobre o que foi criado aqui. O `gerber/`
+fica de fora de propósito: é o projeto original da placa e pertence a quem a
+desenhou. Não estenda a licença a ele.
 
 ## Ao mexer no visualizador
 

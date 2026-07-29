@@ -95,6 +95,11 @@ Ou seja: usar esses símbolos **não obriga** este projeto a adotar CC-BY-SA.
 
 ## Licença deste projeto
 
-Ainda não definida — é decisão do dono do repositório. Enquanto não houver um
-arquivo `LICENSE`, vale o padrão legal de **todos os direitos reservados**, o
-que impede terceiros de reutilizar o material mesmo estando ele público.
+**MIT** — ver [`LICENSE`](LICENSE).
+
+Ela cobre o que foi criado aqui: os scripts em `tools/`, o visualizador, e os
+desenhos e documentos gerados em `docs/` e `hardware/`.
+
+**Não cobre o `gerber/`.** Aquele pacote é o projeto original da placa e
+pertence a quem a desenhou — está no repositório como material de origem da
+engenharia reversa. O `LICENSE` diz isso explicitamente.

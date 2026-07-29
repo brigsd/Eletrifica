@@ -209,4 +209,11 @@ Duas coisas aqui não são deste projeto: o **three.js** (MIT), versionado em
 qualquer máquina. Detalhes e textos de licença em
 [`THIRD_PARTY.md`](THIRD_PARTY.md).
 
-O projeto em si ainda **não tem licença definida**.
+## Licença
+
+**MIT** — ver [`LICENSE`](LICENSE).
+
+Cobre o que foi criado aqui: os scripts, o visualizador, os desenhos e a
+documentação. **Não cobre o `gerber/`**, que é o projeto original da placa e
+pertence a quem a desenhou — ele está aqui como material de origem da
+engenharia reversa.
