@@ -291,6 +291,19 @@ def test_r08_chip_sobre_a_peca():
     assert _erros(rede(x_chip_b=100.0)) == {"R08-capacidade"}
 
 
+def test_r08_chip_na_camada_de_fotonica_pode_ficar_sob_a_peca():
+    net = rede(x_chip_b=100.0)
+    for c in net.por_tipo("chip_tradutor"):
+        c.atributos["camada"] = "fotonica"
+    assert "R08-capacidade" not in _erros(net)
+
+
+def test_r06_contato_acima_de_1a():
+    ctx = {**CTX, "contatos": [{"peca": "A", "trilho": "VCCIN", "pinos_acima_1a": 3,
+                                "pino_max_a": 1.2, "celula_max_a": 0.5}]}
+    assert _erros(rede(), ctx) == {"R06-energia"}
+
+
 def test_r08_vias_demais():
     assert _erros(rede(vias_max=4)) == {"R08-capacidade"}
 

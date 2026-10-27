@@ -224,7 +224,9 @@ def _r02(net, rel, redes):
         pad = PADROES.get(s.padrao)
         if pad and pad.bidirecional and len(s.sentidos) < 2:
             rel.violacoes.append(Violacao(R, "erro", s.id, f"{s.id}: pino bidirecional com caminho num sentido só"))
-        if len(s.sentidos) == 2:
+        optico = any(net.blocos.get(b) is not None and net.blocos[b].tipo in ("via_tx", "via_rx")
+                     for cam in s.caminhos.values() for b in _blocos_do_caminho(cam))
+        if len(s.sentidos) == 2 and optico:
             for sentido, cam in s.caminhos.items():
                 chaves = [b for b in _blocos_do_caminho(cam) if net.blocos.get(b) and net.blocos[b].tipo == "chave_sentido"]
                 if len(chaves) < 2:
@@ -527,6 +529,26 @@ def _r06(net, rel):
                                           f"{reg.id}: carga de {carga:.2f} A > {lim:.2f} A"))
 
 
+CORRENTE_MAX_CONTATO_A = 1.0     # "cerca de 1 A por contato", do conceito
+
+
+def _r06_contatos(rel, contexto):
+    """Corrente por pino e por célula, vinda de modulos.energia.contatos.distribuir."""
+    R = "R06-energia"
+    from modulos.sistema.celula import chave
+    for d in (contexto or {}).get("contatos", ()):
+        ch = chave(d.get("chave"))
+        alvo = f"{d['peca']}:{d['trilho']}"
+        if d["pinos_acima_1a"]:
+            rel.violacoes.append(Violacao(R, "erro", alvo,
+                                          f"{alvo}: {d['pinos_acima_1a']} pinos acima de "
+                                          f"{CORRENTE_MAX_CONTATO_A:.0f} A (máx. {d['pino_max_a']:.2f} A)"))
+        if d["celula_max_a"] > ch.corrente_max_a:
+            rel.violacoes.append(Violacao(R, "erro", alvo,
+                                          f"{alvo}: célula com {d['celula_max_a']:.2f} A > "
+                                          f"{ch.corrente_max_a:.2f} A da chave {ch.nome}"))
+
+
 def _r07(net, rel):
     R = "R07-controle"
     controladores = {b.id for b in net.por_tipo("controlador")}
@@ -596,14 +618,15 @@ def _r08(net, rel, contexto):
         w, d = c.atributos.get("largura_mm"), c.atributos.get("profundidade_mm")
         if pos is not None and w and d:
             rets[c.id] = (pos[0] - w / 2, pos[1] - d / 2, pos[0] + w / 2, pos[1] + d / 2)
+    camada = {c.id: c.atributos.get("camada", "superficie") for c in chips}
     ids = sorted(rets)
     for i, a in enumerate(ids):
         for b in ids[i + 1:]:
-            if _sobrepoe(rets[a], rets[b]):
+            if camada[a] == camada[b] and _sobrepoe(rets[a], rets[b]):
                 rel.violacoes.append(Violacao(R, "erro", a, f"{a} sobrepõe {b}"))
     for peca, r in _retangulos_pecas(net, contexto).items():
         for c, rc in rets.items():
-            if _sobrepoe(r, rc):
+            if camada[c] == "superficie" and _sobrepoe(r, rc):
                 rel.violacoes.append(Violacao(R, "erro", c, f"{c} sobrepõe a peça {peca}"))
     for a in net.por_tipo("acoplador"):
         if "fibra" not in a.portas:
@@ -776,6 +799,7 @@ def verificar(netlist, contexto=None):
     _r04(netlist, rel)
     _r05(netlist, rel, contexto)
     _r06(netlist, rel)
+    _r06_contatos(rel, contexto)
     _r07(netlist, rel)
     _r08(netlist, rel, contexto)
     _r09(netlist, rel, contexto)

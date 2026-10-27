@@ -38,15 +38,18 @@ PADROES = {p.nome: p for p in (
     Padrao("CMOS-1V2", "se", 1.2, "estatico", 0.001, "cmos", 50, False, False),
     Padrao("CMOS-1V05", "se", 1.05, "NRZ", 0.05, "cmos", 50, False, False),
     Padrao("CMOS-1V8", "se", 1.8, "NRZ", 0.1, "cmos", 50, False, False),
-    Padrao("OD-1V05", "se", 1.05, "NRZ", 0.05, "dreno_aberto", 50, True, False),
+    Padrao("OD-1V05", "se", 1.05, "NRZ", 0.05, "dreno_aberto", 50, False, False),
+    Padrao("OD-1V05-BIDIR", "se", 1.05, "NRZ", 0.05, "dreno_aberto", 50, True, False),
+    Padrao("I3C-1V0", "se", 1.0, "NRZ", 0.0125, "dreno_aberto", 50, True, False),
     Padrao("OD-1V1", "se", 1.1, "estatico", 0.001, "dreno_aberto", 50, False, False),
     Padrao("SVID", "se", 1.0, "NRZ", 0.05, "dreno_aberto", 50, True, False),
 )}
 
 _AUX = {
     "SVID_CLK": "SVID", "SVID_DATA": "SVID", "SVID_ALERT": "SVID",
-    "BCLK": "HCSL-100M", "SMBUS_DATA": "OD-1V05", "SMBUS_CLK": "OD-1V05",
-    "PECI": "OD-1V05", "PROCHOT": "OD-1V05", "CATERR": "OD-1V05", "THERMTRIP": "OD-1V05",
+    "BCLK": "HCSL-100M", "SMBUS_DATA": "OD-1V05-BIDIR", "SMBUS_CLK": "OD-1V05",
+    "PECI": "OD-1V05-BIDIR", "PROCHOT": "OD-1V05-BIDIR", "CATERR": "OD-1V05",
+    "THERMTRIP": "OD-1V05",
 }
 
 
@@ -54,6 +57,8 @@ def padrao_do_pino(protocolo, nome):
     """Nome do padrão elétrico de um pino, pelo protocolo da interface e o nome."""
     p = papel(nome)
     if protocolo == "DDR5-4800":
+        if nome.endswith(("HSCL", "HSDA")):
+            return "I3C-1V0"
         return {"DQ": "DDR5-DQ", "DQS": "DDR5-DQS", "CA": "DDR5-CA", "CS": "DDR5-CA",
                 "CK": "DDR5-CK", "RESET": "CMOS-1V1", "ALERT": "OD-1V1"}[p]
     if protocolo in ("PCIe5", "PCIe4"):
