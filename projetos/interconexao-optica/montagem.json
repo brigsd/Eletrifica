@@ -20,6 +20,12 @@
     {"id": "M11", "tipo": "GDDR7", "x": 125.0, "y": 95.0, "rot": 270.3},
     {"id": "FPGA", "tipo": "FPGA",        "x": 40.0,  "y": 190.0, "rot": 270.2}
   ],
+  "projeto": {
+    "chave_celula": "rele_mems",
+    "tradutores": "sob_peca",
+    "cobre_plano_oz": 2,
+    "config_optica": "viavel"
+  },
   "zonas": {
     "vrm_cpu": {"x0": 72, "y0": 112, "x1": 94, "y1": 148, "fases": 8},
     "entrada_12v": {"x": 6, "y": 130}

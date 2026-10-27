@@ -12,6 +12,8 @@ import re
 
 import numpy as np
 
+from modulos.conexoes.construir import construir
+from modulos.conexoes.verificador import REGRAS, verificar
 from modulos.dados import emulador as DE
 from modulos.dados import latencia as DL
 from modulos.dados import roteamento as DR
@@ -22,6 +24,8 @@ from modulos.sistema import base as B
 from modulos.sistema import configuracao as C
 from modulos.sistema import mapeamento as M
 from modulos.sistema.base import F_ENERGIA, PROJETO
+from modulos.sistema.boot import emular
+from modulos.sistema.celula import chave as chave_celula
 from modulos.termico import difusao
 from modulos.visual import cena as V
 from modulos.visual import graficos as G
@@ -29,6 +33,15 @@ from modulos.visual import graficos as G
 DOCS = PROJETO / "docs"
 TEMPO_SONDA_US = 2.0          # por célula
 TIPO_FIBRA = {"DDR5-4800": "DDR5", "GDDR7-32": "GDDR7", "PCIe5": "PCIe", "PCIe4": "AUX"}
+R_FOLHA_1OZ_MOHM = 0.5 / 2          # dois planos de 1 oz em paralelo, como o modelo de energia usa
+
+# do conceito até o projeto atual: cada linha muda uma decisão
+CENARIOS = (
+    ("conceito: tradutor ao lado, célula com MOSFET", "ao_lado", "mosfet_potencia", 1),
+    ("tradutor sob a peça", "sob_peca", "mosfet_potencia", 1),
+    ("+ relé MEMS na célula", "sob_peca", "rele_mems", 1),
+    ("+ plano de energia com 2 oz", "sob_peca", "rele_mems", 2),
+)
 
 
 def _canal(cfg, gbps, simbolo):
@@ -41,22 +54,61 @@ def _perturbacao(t_us, salto_k=10.0, tau_us=200.0, inicio_us=600.0):
     return 0.0 if t_us < inicio_us else salto_k * (1 - math.exp(-(t_us - inicio_us) / tau_us))
 
 
-def _fibras_cena(plano):
+def _contatos(m, cfg, nome_chave, cobre_oz):
+    d = contatos.distribuir(m.base, cfg, zona_vrm=m.zonas["vrm_cpu"],
+                            r_on_mohm=chave_celula(nome_chave).r_on_ohm * 1e3,
+                            r_folha_mohm=R_FOLHA_1OZ_MOHM / cobre_oz)
+    d["chave"] = nome_chave
+    return d
+
+
+def _fibras_netlist(nl):
+    """Fibras de dados (entre chips tradutores) e de laser (do módulo ao chip)."""
     out = []
-    for f in plano.fibras:
-        rota = [(float(x), float(y)) for x, y in f.rota]
+    for k, f in enumerate(nl.por_tipo("fibra")):
+        a = f.atributos
+        rota = [(float(x), float(y)) for x, y in a.get("rota", [])]
+        if len(rota) < 2:
+            ponta = [nl.blocos[b].posicao for b in (a.get("de"), a.get("para")) if b in nl.blocos]
+            rota = [(float(x), float(y)) for x, y in ponta]
         if len(rota) < 2:
             continue
-        alto = 5.0 + 0.8 * (f.id % 14)
+        laser = f.id.startswith("fibl")
+        alto = (2.5 + 0.3 * (k % 6)) if laser else (5.0 + 0.8 * (k % 14))
         pts = [[*rota[0], 1.0]] + [[x, y, alto] for x, y in rota[1:-1]] + [[*rota[-1], 1.0]]
         if len(pts) == 2:
-            meio = [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2, alto]
-            pts.insert(1, meio)
-        out.append({"id": f.id, "tipo": TIPO_FIBRA.get(f.protocolo, "AUX"),
-                    "de": f.hub, "para": list(f.destinos), "canais": len(f.canais),
-                    "comprimento_mm": round(f.comprimento_mm, 1),
-                    "pontos": [[round(a, 2) for a in p] for p in pts]})
+            pts.insert(1, [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2, alto])
+        out.append({"id": f.id, "tipo": "LASER" if laser else TIPO_FIBRA.get(a.get("protocolo"), "AUX"),
+                    "de": a.get("de"), "para": a.get("para"),
+                    "canais": len(a.get("lambdas_nm", [])), "raio": 0.35 if laser else 0.7,
+                    "comprimento_mm": round(float(a.get("comprimento_mm", 0.0)), 1),
+                    "pontos": [[round(c, 2) for c in p] for p in pts]})
     return out
+
+
+def _cadeia_netlist(nl):
+    """O que fica entre o pino e a fibra: chips tradutores, lasers e trilhas da base."""
+    chips = []
+    for c in nl.por_tipo("chip_tradutor"):
+        a = c.atributos
+        vias = [f for f in nl.filhos(c.id) if f.tipo in ("via_tx", "via_rx")]
+        chips.append({"id": c.id, "peca": a.get("peca"), "x": round(c.posicao[0], 2),
+                      "y": round(c.posicao[1], 2), "largura": a.get("largura_mm", 10.0),
+                      "profundidade": a.get("profundidade_mm", 10.0),
+                      "camada": a.get("camada", "superficie"), "vias": len(vias),
+                      "vias_max": a.get("vias_max"), "potencia_w": round(float(a.get("potencia_w", 0.0)), 2)})
+    lasers = [{"id": b.id, "x": round(b.posicao[0], 2), "y": round(b.posicao[1], 2),
+               "linhas": b.atributos.get("linhas_acesas"),
+               "potencia_w": b.atributos.get("potencia_eletrica_w")} for b in nl.por_tipo("laser")]
+    trilhas = []
+    for t in nl.por_tipo("trilha"):
+        a = t.atributos
+        if t.posicao is None or a.get("ate") is None:
+            continue
+        trilhas.append([round(float(t.posicao[0]), 2), round(float(t.posicao[1]), 2),
+                        round(float(a["ate"][0]), 2), round(float(a["ate"][1]), 2),
+                        1 if a.get("camada") == "sinal" else 0])
+    return {"tradutores": chips, "lasers": lasers, "trilhas": trilhas}
 
 
 def executar():
@@ -82,7 +134,8 @@ def executar():
 
     # 4-5. energia ------------------------------------------------------------
     R["arvore"] = arvore.balanco(cfg)
-    dist = contatos.distribuir(m.base, cfg, zona_vrm=m.zonas["vrm_cpu"])
+    pj = m.projeto
+    dist = _contatos(m, cfg, pj.get("chave_celula"), pj.get("cobre_plano_oz", 1))
     deg = vrm.simular_degrau()
     curto = protecao.simular_curto()
     R["contatos"] = {k: dist[k] for k in ("pinos", "celulas", "pino_max_a", "pino_medio_a",
@@ -101,7 +154,7 @@ def executar():
     R["optica"] = {n: {"simples": E.calculo_simples(c), "fisico": E.orcamento(c)}
                    for n, c in cfgs.items()}
     R["varredura"] = E.varrer(cfgs["ajustada"])
-    viavel = cfgs["viavel"]
+    viavel = cfgs[pj.get("config_optica", "viavel")]
     canais = {"GDDR7": _canal(viavel, 32.0, "PAM3"), "PCIe5": _canal(viavel, 32.0, "NRZ"),
               "DDR5": _canal(viavel, 4.8, "NRZ")}
     R["canais"] = {k: {"ber": c.ber_estimada, "erros": c.erros_contados, "simbolos": c.simbolos,
@@ -149,6 +202,27 @@ def executar():
     R["rajadas"] = {k: {"erros_bits": r.erros_bits, "sentido": r.sentido_decodificado}
                     for k, r in raj.items()}
 
+    # 11. conexões: a netlist do sistema inteiro, o verificador e o boot -------------
+    R["conexoes"] = []
+    for nome, pos, ch, oz in CENARIOS:
+        nl = construir(m, cfg, plano, viavel, posicionamento=pos, chave=ch)
+        rel = verificar(nl, {"contatos": [_contatos(m, cfg, ch, oz)]})
+        exemplos = {}
+        for v in rel.erros:
+            exemplos.setdefault(v.regra, v.mensagem)
+        R["conexoes"].append({"nome": nome, "posicionamento": pos, "chave": ch, "cobre_oz": oz,
+                              "por_regra": {k: rel.contagem(k, "erro") for k in REGRAS},
+                              "erros": len(rel.erros), "exemplos": exemplos})
+    nl = construir(m, cfg, plano, viavel, posicionamento=pj.get("tradutores", "sob_peca"),
+                   chave=pj.get("chave_celula"))
+    rel = verificar(nl, {"contatos": [dist]})
+    R["netlist"] = {**nl.resumo(), "erros": len(rel.erros),
+                    "por_regra": {k: rel.contagem(k, "erro") for k in REGRAS}}
+    ex = emular(nl, sim={"sondagem_us": R["mapeamento"]["tempo_sondagem_ms"] * 1e3,
+                         "vrm_assentamento_us": deg["assentamento_us"],
+                         "aneis_travamento_us": trav["travou_em_us"] or 200.0})
+    R["boot"] = {"ok": ex.ok, "parou_em": ex.parou_em, "tempos_ms": {k: v / 1e3 for k, v in ex.tempos.items()}}
+
     # cena 3D ---------------------------------------------------------------------
     corrente = dist["mapa_corrente"]
     tx = {"sondagem": V.textura_sondagem(m.base, sond.celula),
@@ -156,9 +230,9 @@ def executar():
           "corrente": V.textura_escala(m.base, corrente, 0.0, float(corrente.max()),
                                        mascara=cfg.funcao == F_ENERGIA),
           "temperatura": V.textura_escala(m.base, term.regime, term.t_amb, float(term.regime.max()))}
-    etapas = _etapas(R, cfg)
-    V.exportar(m.base, cfg, tx, fibras=_fibras_cena(plano), etapas=_virgulas(etapas),
-               resumo=_virgulas(_resumo(R)), metricas=_virgulas(_metricas(R, cfg, dist)))
+    V.exportar(m.base, cfg, tx, fibras=_fibras_netlist(nl), etapas=_virgulas(_etapas(ex, R)),
+               resumo=_virgulas(_resumo(R)), metricas=_virgulas(_metricas(R, cfg, dist)),
+               extras=_cadeia_netlist(nl))
 
     # relatório -------------------------------------------------------------------
     DOCS.mkdir(exist_ok=True)
@@ -167,42 +241,20 @@ def executar():
     return R
 
 
-def _etapas(R, cfg):
-    mp = R["mapeamento"]
-    todas = [p.nome for p in cfg.pecas]
-    aux = [p.nome for p in cfg.pecas if p.nome != "CPU"]
-    tr = R["travamento"]
-    return [
-        {"nome": "Sondagem", "t": f"0–{mp['tempo_sondagem_ms']:.0f} ms", "camada": "sondagem",
-         "transparente": True,
-         "descricao": f"Sinal de teste fraco em cada célula: {mp['celulas_em_contato']} células tocam "
-                      f"algum pino, {mp['pontes']} em ponte. Nada energizado."},
-        {"nome": "Identificação", "t": f"{mp['tempo_sondagem_ms']:.0f} ms", "camada": "sondagem",
-         "descricao": f"{mp['tipos_certos']} de {mp['pecas']} peças reconhecidas pelo padrão "
-                      f"terra/energia/sinal; erro de posição até {mp['erro_max_mm'] * 1000:.1f} µm."},
-        {"nome": "Configuração", "t": "+1 ms", "camada": "funcoes", "transparente": True,
-         "descricao": "Cada célula assume energia, terra ou sinal; o resto fica desligado."},
-        {"nome": "Energia auxiliar", "t": "+10 ms", "camada": "funcoes", "energizadas": aux,
-         "enlaces_ativos": [],
-         "descricao": "FPGA, memórias e 3,3 V da GPU. A CPU continua desligada."},
-        {"nome": "Núcleo da CPU", "t": "+2 ms", "camada": "corrente", "energizadas": todas,
-         "transparente": True,
-         "descricao": f"VRM de 8 fases sobe o VCCIN pelo SVID. A 200 A o pino mais carregado leva "
-                      f"{R['contatos']['pino_max_a']:.2f} A; {R['contatos']['pinos_acima_1a']} pinos passam de 1 A."},
-        {"nome": "Travamento dos anéis", "t": "+0,3 ms", "camada": "temperatura", "energizadas": todas,
-         "descricao": f"Aquecedores varrem e travam cada anel; erro residual {tr['erro_final_pm']:.2f} pm."},
-        {"nome": "Relógios e reset", "t": "+5 ms", "camada": "funcoes", "energizadas": todas,
-         "enlaces_ativos": ["AUX"], "descricao": "100 MHz de referência, PWROK e PLTRST pela FPGA."},
-        {"nome": "Treino da memória", "t": "+200 ms", "camada": "funcoes", "energizadas": todas,
-         "enlaces_ativos": ["AUX", "DDR5"],
-         "descricao": "A CPU varre o atraso do DQS em cada pista e grava o centro da janela."},
-        {"nome": "PCIe e GDDR7", "t": "+100 ms", "camada": "funcoes", "energizadas": todas,
-         "enlaces_ativos": ["AUX", "DDR5", "PCIe", "GDDR7"],
-         "descricao": "Enlace PCIe 5.0 até a GPU e os 384 bits de GDDR7 em PAM3."},
-        {"nome": "Pronto", "t": "~0,3 s", "camada": "temperatura", "energizadas": todas,
-         "enlaces_ativos": ["AUX", "DDR5", "PCIe", "GDDR7"],
-         "descricao": f"Sistema ligado. Base a até {R['termico']['max_c']:.0f} °C em carga máxima."},
-    ]
+def _etapas(ex, R):
+    """As etapas vêm do boot emulado; aqui só entram os números das outras simulações."""
+    extra = {
+        "Núcleo da CPU": f" A 200 A o pino mais carregado leva {R['contatos']['pino_max_a']:.2f} A.",
+        "Anéis travados": f" Erro residual de sintonia {R['travamento']['erro_final_pm']:.2f} pm.",
+        "Pronto": f" Base a até {R['termico']['max_c']:.0f} °C em carga máxima.",
+    }
+    out = []
+    for e in ex.etapas:
+        e = dict(e)
+        e["descricao"] = e["descricao"] + extra.get(e["nome"], "")
+        e["energizadas"] = sorted(set(e.get("energizadas", [])))
+        out.append(e)
+    return out
 
 
 def _ber(v):
@@ -256,6 +308,11 @@ def _resumo(R):
         "Base, máx.": f"{R['termico']['max_c']:.0f} °C",
         "Treino DDR5": {"valor": "converge" if all(t["ok"] for t in R["treino"].values()) else "falha",
                         "estado": _estado(all(t["ok"] for t in R["treino"].values()))},
+        "Verificador de conexões": {"valor": f"{R['netlist']['erros']} erros",
+                                    "estado": _estado(R["netlist"]["erros"] == 0)},
+        "Boot emulado": {"valor": (f"pronto em {R['boot']['tempos_ms']['Pronto']:.0f} ms" if R["boot"]["ok"]
+                                   else f"para em {R['boot']['parou_em']['etapa']}"),
+                         "estado": _estado(R["boot"]["ok"])},
     }
 
 
@@ -298,6 +355,52 @@ def _graficos(g7, trav, livre, deg):
     (DOCS / "vrm-degrau.svg").write_text(svg)
 
 
+NOME_REGRA = {"R01-caminho": "caminho", "R02-sentido": "sentido", "R03-padrao": "nível elétrico",
+              "R04-banda": "banda", "R05-optico": "luz", "R06-energia": "energia",
+              "R07-controle": "controle", "R08-capacidade": "capacidade", "R09-tempo": "tempo",
+              "R10-relogio": "relógio", "R11-requisito": "requisito", "R12-orfao": "órfão"}
+
+
+def _secao_conexoes(R):
+    nlr, cen, bt = R["netlist"], R["conexoes"], R["boot"]
+    L = ["## Conexões — a netlist do sistema inteiro", "",
+         f"Cada sinal é seguido salto a salto: pino → célula → trilha na base → chip tradutor → "
+         f"modulador → fibra → filtro → receptor → driver de saída → trilha → célula → pino, "
+         f"com laser, alimentação, controle e relógio de cada bloco ativo. São "
+         f"{nlr['blocos']} blocos, {nlr['ligacoes']} ligações e {nlr['sinais']} sinais. "
+         "O verificador (`modulos/conexoes/verificador.py`) confere 12 regras.", "",
+         "Erros por regra, do conceito até o projeto atual:", "",
+         "| Regra | " + " | ".join(c["nome"] for c in cen) + " |",
+         "|---|" + "---|" * len(cen)]
+    for k in REGRAS:
+        if any(c["por_regra"][k] for c in cen):
+            L.append(f"| {NOME_REGRA[k]} | " + " | ".join(str(c["por_regra"][k]) for c in cen) + " |")
+    L.append("| **total** | " + " | ".join(f"**{c['erros']}**" for c in cen) + " |")
+    L += ["", "O que cada decisão resolveu:", ""]
+    conc = cen[0]["exemplos"]
+    for k, msg in conc.items():
+        L.append(f"- **{NOME_REGRA[k]}** (conceito): {msg}")
+    L += ["",
+          "- **Tradutor sob a peça:** com o chip ao lado, trilhas de até 120 mm na base estouram o "
+          "atraso e o desalinhamento da GDDR7; numa camada de fotônica debaixo da peça, cada pino "
+          "desce poucos milímetros até o seu chip.",
+          "- **Relé MEMS na célula:** a célula do conceito usa a mesma chave para 1 A de energia e "
+          "para sinal de 32 Gb/s. Uma chave de transistor com R_on baixo o bastante para a energia "
+          "tem dezenas de pF desligada, e isso derruba a banda de todo sinal rápido. Um relé, quando "
+          "aberto, é um vão de ar: 20 fF. Ele só pode mudar de estado sem corrente, e a "
+          "configuração das células acontece antes de energizar.",
+          "- **Plano de energia com 2 oz:** com 1 oz a corrente se concentra nos pinos de VCCIN "
+          "perto do VRM e alguns passam de 1 A.", ""]
+    if bt["ok"]:
+        L += [f"### Boot emulado na netlist: pronto em {bt['tempos_ms']['Pronto']:.0f} ms", "",
+              "Máquina de estados com guarda em cada transição (`modulos/sistema/boot.py`):", "",
+              "| Etapa | Concluída em |", "|---|---|"]
+        L += [f"| {k} | {v:.2f} ms |" for k, v in bt["tempos_ms"].items()]
+    else:
+        L += [f"### Boot emulado: para em **{bt['parou_em']['etapa']}** — {bt['parou_em']['motivo']}"]
+    return L + [""]
+
+
 def _relatorio(R):
     mp, o, c = R["mapeamento"], R["optica"], R["canais"]
     L = ["# Resultados da simulação", "",
@@ -321,7 +424,8 @@ def _relatorio(R):
           f"{a['pela_base_w']:.0f} W passam pela base, {a['pelo_cabo_w']:.0f} W pelo cabo da GPU.",
           f"- VCCIN a 200 A em {ct['pinos']} pinos e {ct['celulas']} células: média "
           f"{ct['pino_medio_a']:.2f} A por pino, máximo **{ct['pino_max_a']:.2f} A**; "
-          f"**{ct['pinos_acima_1a']} pinos passam de 1 A** (os mais perto do VRM). "
+          f"**{ct['pinos_acima_1a']} pinos passam de 1 A**"
+          f"{' (os mais perto do VRM)' if ct['pinos_acima_1a'] else ''}. "
           f"Célula mais carregada: {ct['celula_max_a']:.2f} A.",
           f"- Queda IR na base {ct['queda_ir_mv']:.1f} mV, perdas {ct['perdas_w']:.1f} W.",
           f"- VRM, degrau 30 → 180 A: queda total {v['queda_total_mv']:.0f} mV (reta de carga), "
@@ -373,6 +477,8 @@ def _relatorio(R):
           f"{tr['erro_max_travado_pm']:.1f} pm e o residual {tr['erro_final_pm']:.2f} pm. "
           f"Sem controle chega a {tr['erro_sem_controle_pm']:.0f} pm.", "",
           "![Controle térmico](controle-termico.svg)", ""]
+
+    L += _secao_conexoes(R)
 
     rc, rd = R["roteamento"]["comutado"], R["roteamento"]["dedicado"]
     L += ["## Etapa 5 — dados", "",

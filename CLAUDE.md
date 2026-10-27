@@ -54,7 +54,8 @@ modulos/      ferramentas por objetivo; cada pasta é um módulo Python
   caminhos.py   RAIZ, PROJETOS, BUILD — use isto, não monte caminho na mão
   pcb/          engenharia reversa de PCB a partir do Gerber
   componentes/  modelos das peças do projeto óptico
-  sistema/      base de células, sondagem, identificação, simulação completa
+  sistema/      base de células, chave da célula, sondagem, identificação, boot, simulação
+  conexoes/     netlist do sistema inteiro + verificador de conexões (12 regras)
   energia/ termico/ optica/ dados/   simuladores
   visual/       cena 3D e gráficos SVG
 projetos/     um diretório por projeto (dados de origem + saídas geradas + visualizador)
@@ -149,8 +150,9 @@ chaveadas; dados por fibra óptica. O conceito do dono está em
 `projetos/interconexao-optica/docs/conceito.md` (cópia do documento
 <https://claude.ai/artifact/3NMHV7qQad9bxKu82cApAJ>).
 
-Fontes: `montagem.json` (onde cada peça foi encaixada) e `enlace.json`
-(parâmetros ópticos). Tudo o mais é gerado por:
+Fontes: `montagem.json` (onde cada peça foi encaixada e, na chave `projeto`,
+as decisões de projeto) e `enlace.json` (parâmetros ópticos). Tudo o mais é
+gerado por:
 
 ```bash
 python3 -m modulos.sistema.simular    # ~30 s: docs/resultados.md, docs/*.svg, web/
@@ -165,14 +167,26 @@ Regras do modelo:
   seguem cada encapsulamento; a posição de cada sinal não é a do datasheet.
 - `calculo_simples` reproduz o cálculo do documento; `orcamento` é o modelo
   físico. Os dois aparecem lado a lado no relatório.
+- **Nada é conectado por mágica.** `modulos/conexoes/construir.py` monta a
+  netlist com cada salto de cada sinal (célula, trilha, chip tradutor, laser,
+  fibra, receptor, driver), mais energia, controle e relógio de cada bloco.
+  `verificador.py` confere 12 regras; `modulos/sistema/boot.py` liga o sistema
+  como máquina de estados sobre essa netlist. Um módulo novo que crie
+  conexões tem de entrar na netlist, senão o verificador não o enxerga.
+- **Uma chave por célula.** `modulos/sistema/celula.py` é a especificação
+  única, usada pela energia e pelos sinais. Não use números de chave soltos.
+- Os testes da netlist real usam o fixture `netlist_real` de `tests/conftest.py`.
 
 Resultados atuais (confira rodando, não confie nestes números):
 
 - 17/17 peças identificadas, erro de µm.
+- Conceito como estava: ~2.700 erros no verificador. Com as decisões de
+  `montagem.json` (tradutor sob a peça, relé MEMS na célula, plano de 2 oz):
+  0 erros, e o boot emulado fica pronto em ~550 ms.
 - 64 λ por fibra **não fecha** no modelo físico (diafonia); a configuração
   `viavel` (16 λ/fibra, 4 canais por laser) dá ~+2,9 dB em PAM3.
 - Controle térmico por anel é obrigatório (< 1 K de janela sem ele).
-- A 200 A, ~21 pinos de VCCIN passam de 1 A.
+- A 200 A com plano de 1 oz, ~21 pinos de VCCIN passam de 1 A; com 2 oz, nenhum.
 
 ---
 

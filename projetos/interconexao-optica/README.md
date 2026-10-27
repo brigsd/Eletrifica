@@ -31,16 +31,30 @@ Os achados principais:
    laser para cada 4 canais.
 3. **Controle térmico por anel é obrigatório**: sem ele o enlace aguenta menos de
    1 °C de variação.
-4. **Contatos de energia**: a 200 A, alguns pinos de núcleo da CPU perto do
-   regulador passam de 1 A.
+4. **Contatos de energia**: a 200 A, com plano de 1 oz, pinos de núcleo da CPU
+   perto do regulador passam de 1 A; com 2 oz o máximo cai para ~0,9 A.
 5. **Treino de memória** converge pelo caminho óptico, e quebra se uma peça se
    mover depois — a reconfiguração tem de vir antes do treino.
+6. **As conexões fecham salto a salto.** Cada sinal é seguido de pino a pino
+   (célula, trilha, tradutor, laser, fibra, receptor, driver), com energia,
+   controle e relógio de cada bloco. O conceito, como estava, dá ~2.700 erros no
+   verificador; três decisões de projeto zeram todos, e o boot emulado completa.
+
+## Decisões de projeto que o verificador exigiu
+
+Ficam em `montagem.json`, chave `projeto`:
+
+| Decisão | Por quê |
+|---------|---------|
+| `tradutores: sob_peca` | Ao lado da peça, trilhas de até 120 mm estouram atraso e desalinhamento da GDDR7. Numa camada de fotônica sob a peça, o pino desce poucos mm. |
+| `chave_celula: rele_mems` | A mesma chave não serve para 1 A de energia e para 32 Gb/s: transistor com R_on baixo tem dezenas de pF desligado. Relé aberto é vão de ar (~20 fF); só comuta sem corrente, e as células são configuradas antes de energizar. |
+| `cobre_plano_oz: 2` | Com 1 oz, pinos de VCCIN perto do VRM passam de 1 A. |
 
 ## Fontes do projeto
 
 | Arquivo | O que define |
 |---------|--------------|
-| `montagem.json` | Tamanho da base, passo das células, onde cada peça foi encaixada (só a sondagem emulada lê isto) |
+| `montagem.json` | Tamanho da base, passo das células, onde cada peça foi encaixada (só a sondagem emulada lê a posição) e as decisões de projeto |
 | `enlace.json` | Parâmetros físicos do enlace óptico e as configurações original, ajustada e viável |
 | `docs/conceito.md` | O conceito, transcrito do documento do dono |
 
@@ -51,7 +65,8 @@ Tudo em `docs/*.svg`, `docs/resultados.md` e `web/` é gerado. Não edite à mã
 | Módulo | Simula |
 |--------|--------|
 | `modulos/componentes` | As peças: contatos, função de cada pino, trilhos, interfaces |
-| `modulos/sistema` | Base de células, sondagem, identificação, configuração, simulação completa |
+| `modulos/sistema` | Base de células, chave da célula, sondagem, identificação, configuração, boot emulado, simulação completa |
+| `modulos/conexoes` | Netlist do sistema inteiro (cada salto tipado) e o verificador de conexões, com 12 regras |
 | `modulos/energia` | Divisão de corrente nos contatos, VRM, proteção contra curto, árvore de alimentação |
 | `modulos/termico` | Temperatura da base em regime e no transiente |
 | `modulos/optica` | Anel modulador, filtros, receptor, enlace no tempo, controle térmico dos anéis |

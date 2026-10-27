@@ -21,6 +21,7 @@
   button, select { flex: 1; background: #1e2731; color: var(--ink); border: 1px solid var(--line);
     border-radius: 6px; padding: 6px 8px; font-size: 12px; cursor: pointer; font-family: inherit; }
   button:hover, select:hover { border-color: var(--accent); }
+  button.on { border-color: var(--accent); background: #1a2c3f; }
   .grp { margin-bottom: 12px; }
   .head { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim);
     margin: 0 0 6px; display: flex; align-items: center; gap: 8px; }
@@ -77,6 +78,9 @@
     <div class="row">
       <button id="fib">Fibras</button>
       <button id="reset">Recentrar</button>
+    </div>
+    <div class="row">
+      <button id="dentro">Dentro da base</button>
     </div>
     <div class="grp">
       <div class="head">Camada da base</div>
@@ -215,7 +219,7 @@
   });
 
   // ---- fibras -------------------------------------------------------------
-  const CORES_ENLACE = { DDR5: 0x4ea3ff, GDDR7: 0xb07cff, PCIe: 0x3ddc97, AUX: 0xf2c14e };
+  const CORES_ENLACE = { DDR5: 0x4ea3ff, GDDR7: 0xb07cff, PCIe: 0x3ddc97, AUX: 0xf2c14e, LASER: 0xff6b6b };
   function texturaPulso() {
     const c = document.createElement("canvas"); c.width = 128; c.height = 8;
     const g = c.getContext("2d");
@@ -247,6 +251,41 @@
     fb.mat.map = on ? fb.t : null; fb.mat.needsUpdate = true;
   }
   document.getElementById("fib").onclick = () => { grupoFibras.visible = !grupoFibras.visible; };
+
+  // ---- a cadeia entre o pino e a fibra: tradutores, lasers, trilhas ------------
+  const byId = {};
+  const camadaFoton = new THREE.Group(); camadaFoton.visible = false; world.add(camadaFoton);
+  (cena.tradutores || []).forEach(c => {
+    const sob = c.camada === "fotonica";
+    const m = new THREE.Mesh(new THREE.BoxGeometry(c.largura, c.profundidade, 0.8),
+      new THREE.MeshLambertMaterial({ color: 0xd9b44a, emissive: 0x2a1f00 }));
+    m.position.set(c.x, c.y, sob ? -1.0 : 0.4);
+    m.userData = { tipo: "chip", id: c.id };
+    (sob ? camadaFoton : world).add(m);
+    pickable.push(m); byId[c.id] = c;
+  });
+  if ((cena.trilhas || []).length) {
+    const pos = [];
+    cena.trilhas.forEach(([x0, y0, x1, y1]) => pos.push(x0, y0, -0.5, x1, y1, -0.5));
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    camadaFoton.add(new THREE.LineSegments(g,
+      new THREE.LineBasicMaterial({ color: 0x39c5bb, transparent: true, opacity: 0.55 })));
+  }
+  (cena.lasers || []).forEach(l => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(40, 25, 6),
+      new THREE.MeshLambertMaterial({ color: 0x5a2328 }));
+    m.position.set(l.x, l.y, 3);
+    m.userData = { tipo: "laser", id: l.id };
+    world.add(m); pickable.push(m); byId[l.id] = l;
+  });
+  const slabMat = slab.material;
+  document.getElementById("dentro").onclick = () => {
+    const on = !camadaFoton.visible;
+    camadaFoton.visible = on;
+    [slabMat, faceMat].forEach(mt => { mt.transparent = on; mt.opacity = on ? 0.18 : 1; mt.depthWrite = !on; mt.needsUpdate = true; });
+    document.getElementById("dentro").classList.toggle("on", on);
+  };
 
   // ---- menu ---------------------------------------------------------------
   const GRUPOS = [["Processamento", ["i5-13600KF", "GPU", "FPGA"]], ["Memória", ["DDR5-DIMM", "GDDR7"]]];
@@ -318,12 +357,31 @@
     mouse.x = ((e.clientX - r.left) / r.width) * 2 - 1;
     mouse.y = -((e.clientY - r.top) / r.height) * 2 + 1;
     ray.setFromCamera(mouse, camera);
-    return ray.intersectObjects(pickable.filter(m => m.parent.visible))[0];
+    return ray.intersectObjects(pickable.filter(m => m.parent.visible && m.visible))[0];
   }
   renderer.domElement.addEventListener("pointermove", e => {
     renderer.domElement.style.cursor = pick(e) ? "pointer" : "default";
   });
-  renderer.domElement.addEventListener("dblclick", e => { const h = pick(e); if (h) mostrar(h.object.userData.nome); });
+  function mostrarCadeia(ud) {
+    const c = byId[ud.id];
+    const linhas = ud.tipo === "chip"
+      ? [["peça", c.peca], ["vias", `${c.vias} de ${c.vias_max}`], ["camada", c.camada === "fotonica" ? "fotônica, dentro da base, sob a peça" : "superfície"],
+         ["controle", `${num(c.potencia_w, 2)} W`]]
+      : [["linhas acesas", c.linhas], ["potência elétrica", `${num(c.potencia_w, 1)} W`]];
+    infoBody.innerHTML = `
+      <div class="ref">${esc(c.id)}</div>
+      <h2>${ud.tipo === "chip" ? "Chip tradutor" : "Módulo de laser"}</h2>
+      <p>${ud.tipo === "chip"
+        ? "Fotônica de silício: driver e anel modulador para cada sinal que sai, filtro, fotodetector e driver de saída para cada sinal que chega, com a terminação que a peça espera. Alimentado pela base, configurado pelo FPGA, com luz vinda de um módulo de laser."
+        : "Pente de comprimentos de onda dividido entre os chips tradutores por fibras próprias."}</p>
+      <table>${linhas.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table>`;
+    info.classList.add("on");
+  }
+  renderer.domElement.addEventListener("dblclick", e => {
+    const h = pick(e); if (!h) return;
+    const ud = h.object.userData;
+    if (ud.tipo) mostrarCadeia(ud); else mostrar(ud.nome);
+  });
 
   // ---- linha do tempo ------------------------------------------------------
   const steps = document.getElementById("steps"), stepinfo = document.getElementById("stepinfo");
@@ -347,6 +405,7 @@
       mat.depthWrite = !et.transparente; mat.needsUpdate = true;
     });
     const ativos = new Set(et.enlaces_ativos || []);
+    if (i >= cena.etapas.findIndex(e => /laser/i.test(e.nome))) ativos.add("LASER");
     fibras.forEach(fb => ligarFibra(fb, ativos.has(fb.f.tipo)));
     stepinfo.innerHTML = `<b>${esc(et.nome)}</b> · t = ${esc(et.t)} — ${esc(et.descricao)}`;
   }

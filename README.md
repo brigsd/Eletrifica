@@ -18,7 +18,8 @@ hardware, tudo gerado por script.
 modulos/      ferramentas, agrupadas por objetivo (cada pasta é um módulo Python)
   pcb/          Gerber -> netlist, esquemático, desenhos, 3D e visualizador
   componentes/  modelos das peças (CPU, DDR5, GPU, GDDR7, FPGA)
-  sistema/      base de células, sondagem, identificação, simulação completa
+  sistema/      base de células, sondagem, identificação, boot emulado, simulação completa
+  conexoes/     netlist do sistema inteiro e verificador de conexões
   energia/      corrente nos contatos, VRM, proteção, árvore de alimentação
   termico/      temperatura da base
   optica/       anel, filtros, receptor, enlace no tempo, controle térmico

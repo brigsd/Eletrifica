@@ -93,7 +93,8 @@ def pecas(configuracao, metricas=None):
     return out
 
 
-def exportar(base, configuracao, texturas, fibras=(), etapas=(), resumo=None, metricas=None):
+def exportar(base, configuracao, texturas, fibras=(), etapas=(), resumo=None, metricas=None,
+             extras=None):
     """`texturas`: nome -> array RGB (ny, nx, 3). Grava PNGs e cena.json em web/."""
     WEB.mkdir(parents=True, exist_ok=True)
     nomes = {}
@@ -109,6 +110,7 @@ def exportar(base, configuracao, texturas, fibras=(), etapas=(), resumo=None, me
         "fibras": list(fibras),
         "etapas": list(etapas),
         "resumo": resumo or {},
+        **(extras or {}),
     }
     (WEB / "cena.json").write_text(json.dumps(cena, ensure_ascii=False, separators=(",", ":")))
     return cena

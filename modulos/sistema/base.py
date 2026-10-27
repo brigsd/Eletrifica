@@ -92,6 +92,7 @@ class Montagem:
     base: Base
     colocacoes: list
     zonas: dict
+    projeto: dict          # decisões de projeto: chave da célula, posição dos tradutores...
 
     def por_id(self, id_):
         return next(c for c in self.colocacoes if c.id == id_)
@@ -106,4 +107,4 @@ def carregar(caminho=None):
     for p in data["pecas"]:
         extra = {k: v for k, v in p.items() if k not in ("id", "tipo", "x", "y", "rot")}
         cols.append(Colocacao(p["id"], p["tipo"], p["x"], p["y"], p["rot"], extra))
-    return Montagem(base, cols, data.get("zonas", {}))
+    return Montagem(base, cols, data.get("zonas", {}), data.get("projeto", {}))
