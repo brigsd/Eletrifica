@@ -287,7 +287,7 @@ def _executar(nl, cfg, top, ex):
     for v in vr:
         if blocos[v].tipo == "regulador":
             svid.add(v)
-        rv = {top.rede("controle", p) for p in top.portas(v, "controle")}
+        rv = {top.rede("controle", p) for p in top.portas(v, "controle", ("sai",))}
         for r in tipo("regulador"):
             if {top.rede("controle", p) for p in top.portas(r, "controle")} & rv:
                 svid.add(r)

@@ -115,7 +115,100 @@ def test_requisitos_honestos(montado):
     req = {(r.peca, r.capacidade): r.provedor for r in nl.requisitos}
     for cap in ("PCH/DMI", "VR-SVID", "BCLK", "firmware-UEFI", "sequenciamento-PWROK"):
         assert ("CPU", cap) in req
-    assert req[("DIMM0", "SPD/I3C")] is None
+    assert req[("DIMM0", "SPD/I3C")] == "ctl:fpga"
     for ch in nl.por_tipo("chip_tradutor"):
         for cap in ("laser", "energia", "controle"):
             assert req.get((ch.id, cap)), (ch.id, cap)
+    # todo provedor declara o que oferece
+    for r in nl.requisitos:
+        assert r.provedor and r.capacidade in nl.blocos[r.provedor].atributos.get("capacidades", ()), r
+
+
+def test_pch_chega_aos_transceptores_do_fpga(montado):
+    _, _, nl = montado
+    dmi = [s for s in nl.sinais.values() if s.protocolo == "PCIe4" and s.papel != "REFCLK"]
+    assert dmi
+    for s in dmi:
+        pontas = {s.origem[0], s.destino[0]}
+        assert not any(p.startswith("FPGA:CTL_") for p in pontas), s.id
+        assert all(nl.blocos[p].portas["e"].padrao == "PCIe4-CML" for p in pontas), s.id
+
+
+def test_cada_entrada_de_relogio_tem_uma_fonte(montado):
+    _, _, nl = montado
+    fontes = {}
+    for s in nl.sinais.values():
+        if s.padrao == "HCSL-100M":
+            fontes.setdefault(s.destino, []).append(s.origem)
+    assert {d[0] for d in fontes} >= {"CPU:BCLK", "CPU:REFCLK_PEG", "GPU:REFCLK_PEG", "FPGA:REFCLK_XCVR"}
+    assert all(len(v) == 1 and v[0][0] == "clk:ref" for v in fontes.values())
+
+
+def test_spd_do_dimm_por_trilha_com_conversor_e_pullup(montado):
+    _, _, nl = montado
+    for dimm in ("DIMM0", "DIMM1"):
+        for pino in ("HSCL", "HSDA"):
+            s = next(x for x in nl.sinais.values() if x.destino == (f"{dimm}:{pino}", "e"))
+            tipos = {nl.blocos[b].tipo for b, _ in s.caminhos["ida"]}
+            assert "conversor_nivel" in tipos and "fibra" not in tipos, s.id
+            assert f"pu:{dimm}:{pino}" in nl.blocos
+        assert len(nl.sinais[next(k for k in nl.sinais if k.endswith(f"{dimm}.HSDA"))].sentidos) == 2
+
+
+def test_celula_usa_a_chave_unica(montado):
+    from modulos.sistema.celula import chave
+    _, _, nl = montado
+    ch = chave()
+    for c in nl.por_tipo("celula"):
+        assert c.atributos["r_on_ohm"] == ch.r_on_ohm and c.atributos["c_ff"] == ch.c_off_ff
+        assert c.atributos["chave"] == ch.nome
+
+
+def test_controle_hierarquico(montado):
+    _, _, nl = montado
+    fpga = nl.blocos["ctl:fpga"]
+    for nome, p in fpga.portas.items():
+        if p.dominio != "controle":
+            continue
+        disp = {(l.b if l.a == ("ctl:fpga", nome) else l.a)[0] for l in nl.ligacoes_de(("ctl:fpga", nome))}
+        assert len(disp) <= 32, nome
+        assert not any(nl.blocos[d].tipo == "celula" for d in disp), nome
+    for c in nl.por_tipo("celula"):
+        dono = nl.ligacoes_de((c.id, "ctl"))[0].a[0]
+        assert dono.startswith("ctl:cel:"), c.id
+
+
+def test_reguladores_cabem_a_carga(montado):
+    _, _, nl = montado
+    for rg in nl.por_tipo("regulador"):
+        a = rg.atributos
+        assert a["corrente_max_a"] >= a.get("carga_a", 0.0), rg.id
+
+
+def test_grupo_de_controle_gddr7_numa_fibra(montado):
+    _, _, nl = montado
+    fibras = {}
+    for s in nl.sinais.values():
+        if s.protocolo == "GDDR7-32" and s.grupo.endswith("_CTRL"):
+            fib = frozenset(b for b, _ in s.caminhos["ida"] if nl.blocos[b].tipo == "fibra")
+            fibras.setdefault(s.grupo, set()).add(fib)
+    assert fibras and all(len(v) == 1 for v in fibras.values())
+
+
+def test_tradutores_sob_a_peca(montado):
+    cfg, plano, _ = montado
+    nl = construir(B.carregar(), cfg, plano, E.carregar("viavel"),
+                   chave="rele_mems", posicionamento="sob_peca")
+    chips = nl.por_tipo("chip_tradutor")
+    assert all(c.atributos["camada"] == "fotonica" for c in chips)
+    pecas = {p.nome: p for p in cfg.pecas}
+    for ch in chips:
+        xs = [q[0] for q in _contorno(pecas[ch.atributos["peca"]])]
+        ys = [q[1] for q in _contorno(pecas[ch.atributos["peca"]])]
+        x, y = ch.posicao
+        assert min(xs) - 10 <= x <= max(xs) + 10 and min(ys) - 10 <= y <= max(ys) + 10, ch.id
+    for i, a in enumerate(chips):
+        for b in chips[i + 1:]:
+            assert abs(a.posicao[0] - b.posicao[0]) >= 10 or abs(a.posicao[1] - b.posicao[1]) >= 10
+    cel = nl.por_tipo("celula")[0]
+    assert cel.atributos["chave"] == "rele_mems"

@@ -1,4 +1,3 @@
-import importlib
 
 import pytest
 
@@ -366,45 +365,7 @@ def test_r12_porta_obrigatoria_solta():
 
 
 # ------------------------------------------------------------------ netlist real
-def _construir_real():
-    try:
-        K = importlib.import_module("modulos.conexoes.construir")
-    except Exception:
-        return None
-    fn = getattr(K, "construir", None)
-    if fn is None:
-        return None
-    try:
-        return fn()
-    except TypeError:
-        pass
-    from modulos.dados import roteamento as DR
-    from modulos.optica import enlace as E
-    from modulos.sistema import base as B, configuracao as C, mapeamento as M
-    m = B.carregar()
-    ct = B.calcular_contatos(m.base, m.colocacoes)
-    s = M.sondar(m, ct)
-    cfg = C.configurar(m.base, M.identificar(m.base, s), s)
-    viavel = E.carregar("viavel")
-    plano = DR.rotear(cfg, canais_por_fibra=viavel["canais_por_fibra"])
-    for args in ((m, cfg, plano, viavel), (m, cfg, plano), (cfg, plano)):
-        try:
-            return fn(*args)
-        except TypeError:
-            continue
-    return None
-
-
-@pytest.fixture(scope="module")
-def netlist_real():
-    net = _construir_real()
-    if net is None:
-        pytest.skip("modulos.conexoes.construir ainda não existe ou mudou de assinatura")
-    return net
-
-
 @pytest.mark.lento
-def test_roda_na_netlist_real(netlist_real):
+def test_netlist_real_fecha_com_tradutor_sob_a_peca_e_rele(netlist_real):
     rel = verificar(netlist_real)
-    assert isinstance(rel.ok, bool)
-    assert rel.resumo()
+    assert rel.ok, rel.resumo()

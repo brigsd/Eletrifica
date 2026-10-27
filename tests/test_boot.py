@@ -1,4 +1,3 @@
-import importlib.util
 
 import pytest
 
@@ -193,15 +192,7 @@ def test_caminho_ddr5_incompleto_para_no_pltrst():
 
 
 @pytest.mark.lento
-@pytest.mark.skipif(importlib.util.find_spec("modulos.conexoes.construir") is None,
-                    reason="construtor da netlist ainda não existe")
-def test_boot_na_netlist_real():
-    from modulos.conexoes import construir as K
-    from modulos.sistema import base as B, configuracao as C, mapeamento as M
-
-    m = B.carregar()
-    ct = B.calcular_contatos(m.base, m.colocacoes)
-    s = M.sondar(m, ct)
-    cfg = C.configurar(m.base, M.identificar(m.base, s), s)
-    nl = K.construir(m, cfg)
-    assert isinstance(emular(nl), Execucao)
+def test_boot_na_netlist_real(netlist_real):
+    ex = emular(netlist_real)
+    assert isinstance(ex, Execucao)
+    assert ex.ok, ex.parou_em

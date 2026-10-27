@@ -52,7 +52,7 @@ PROTOCOLOS = {
 # sinais que são dados (rodam a taxa_gbps); o resto é controle
 PAPEIS_DADOS = ("DQ", "DQS", "EDC", "TX", "RX", "DMI")
 DIFERENCIAIS = ("DQS", "CK", "WCK", "TX", "RX", "REFCLK", "DMI")
-BIDIRECIONAIS_AUX = ("SVID_DATA", "SMBUS_DATA", "PECI")
+BIDIRECIONAIS_AUX = ("SVID_DATA", "SMBUS_DATA", "PECI", "PROCHOT")
 
 
 def papel(nome):

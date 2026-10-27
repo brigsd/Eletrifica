@@ -47,12 +47,23 @@ def test_todas_as_interfaces_roteadas(plano):
 
 def test_contagem_bate_com_pinagem(plano):
     cpu = obter("i5-13600KF")
-    sinais_cpu = sum(len(cpu.interfaces[k].sinais) for k in ("DDR5_A", "DDR5_B", "PEG", "PCH", "AUX"))
+    relogio = lambda n: n == "BCLK" or n.startswith("REFCLK")   # vêm do gerador de relógio
+    sinais_cpu = sum(1 for k in ("DDR5_A", "DDR5_B", "PEG", "PCH", "AUX")
+                     for n in cpu.interfaces[k].sinais if not relogio(n))
     sinais_gpu = len(obter("GPU").interfaces["GDDR7"].sinais)
     pinos = {(c.origem, c.pino_origem) for c in plano.canais}
     assert len(pinos) == sinais_cpu + sinais_gpu
     # comutado: um canal por pino
     assert len(plano.canais) == len(pinos)
+
+
+def test_pch_vai_aos_transceptores_e_relogio_fica_fora(plano):
+    e = plano.enlace("CPU-FPGA")
+    pch = [plano.canais[i] for i in e.canais if plano.canais[i].protocolo == "PCIe4"]
+    assert pch and all(not c.pino_destino.startswith("CTL_") for c in pch)
+    par = {c.pino_origem: c.pino_destino for c in pch}
+    assert par["PCIE4_TX0"] == "PCIE4_RX0" and par["DMI_3"] == "DMI_3"
+    assert not any(c.papel == "REFCLK" or c.pino_origem == "BCLK" for c in plano.canais)
 
 
 def test_dedicado_dobra_so_os_bidirecionais(cfg, plano):

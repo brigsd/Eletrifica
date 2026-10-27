@@ -432,7 +432,8 @@ def _r05(net, rel, contexto):
                     rel.violacoes.append(Violacao(R, "erro", s.id,
                                                   f"{s.id} ({sentido}): margem óptica {m:.2f} dB"))
     for f, usos in por_fibra.items():
-        cont = Counter(l for l, *_ in usos)
+        # ida e volta de um pino comutado usam o mesmo λ, nunca ao mesmo tempo
+        cont = Counter(l for l, _ in {(l, sid) for l, sid, _ in usos})
         rep = [l for l, n in cont.items() if n > 1]
         if rep:
             rel.violacoes.append(Violacao(R, "erro", f, f"{f}: comprimento de onda repetido {rep[:4]}"))
@@ -723,6 +724,9 @@ def _r10(net, rel, uf, redes):
     R = "R10-relogio"
     fontes = Counter()
     for s in net.sinais.values():
+        origem = net.blocos.get(s.origem[0])
+        if origem is not None and origem.tipo == "relogio":
+            continue          # já contado pela rede elétrica do gerador
         if len(s.sentidos) == 2:
             fontes[tuple(s.origem)] += 1
             fontes[tuple(s.destino)] += 1

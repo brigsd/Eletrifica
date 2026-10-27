@@ -13,6 +13,8 @@ CONVERSOR = {
     ("GDDR7", "VDDQ"): ("buck 1,2 V compartilhado", 0.88),
     ("FPGA", "VCCINT"): ("buck 0,85 V", 0.87),
     ("FPGA", "VCCAUX"): ("buck 1,8 V", 0.88),
+    ("FPGA", "MGTAVCC"): ("buck 0,9 V de baixo ruído (transceptores)", 0.85),
+    ("FPGA", "MGTAVTT"): ("buck 1,2 V de baixo ruído (transceptores)", 0.85),
 }
 
 

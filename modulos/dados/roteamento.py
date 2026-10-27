@@ -18,6 +18,7 @@ FOLGA_VERTICAL_MM = 10.0     # subida e descida da fibra entre a base e o tradut
 FOLGA_PARADA_MM = 5.0        # desvio em cada parada de um barramento WDM
 SAIDA_MM = 3.0               # trecho reto saindo do tradutor
 PAPEIS_BARRAMENTO = ("DQ", "DQS", "TX", "RX", "DMI")   # vão em fibras de dados; o resto, de controle
+PARADAS_MAX = 2              # destinos por fibra de barramento: mais paradas, mais atraso
 
 
 @dataclass
@@ -170,7 +171,7 @@ def _grupo(prefixo, nome, papel_):
         return f"{prefixo}_B{num // 8}"
     if papel_ == "DQS":
         return f"{prefixo}_B{num}"
-    if papel_ in ("CA", "CS", "CK", "WCK", "RESET"):
+    if papel_ in ("CA", "CS", "CK", "WCK"):          # RESET é estático: fica fora do grupo
         return f"{prefixo}_CTRL"
     return nome
 
@@ -239,18 +240,31 @@ def _enlaces(cfg):
         mapa = [(n, "GX_" + n.split("_", 1)[1], g, "GDDR7-32") for n in sinais_g[g]]
         enlaces.append((f"GPU-{m}", "GPU", m, g, mapa))
 
-    mapa = [(n, n, "PEG", "PCIe5") for n in cpu.peca.interfaces["PEG"].sinais]
+    # relógios de referência não viajam com os dados: vêm do gerador de relógio da base
+    mapa = [(n, n, "PEG", "PCIe5") for n in cpu.peca.interfaces["PEG"].sinais if not _relogio(n)]
     enlaces.append(("CPU-GPU", "CPU", "GPU", "PEG", mapa))
 
+    xcvr = set(fpga.peca.interfaces["XCVR"].sinais)
+    mapa = []
+    for n in cpu.peca.interfaces["PCH"].sinais:
+        if _relogio(n):
+            continue
+        par = n.replace("TX", "#").replace("RX", "TX").replace("#", "RX") if n.startswith("PCIE4") else n
+        if par not in xcvr:
+            raise ValueError(f"o FPGA não tem transceptor para {n}")
+        mapa.append((n, par, "PCH", "PCIe4"))
     ctl = iter(fpga.peca.interfaces["CTL"].sinais)
-    mapa = [(n, next(ctl), "PCH", "PCIe4") for n in cpu.peca.interfaces["PCH"].sinais]
-    mapa += [(n, next(ctl), "AUX", "AUX") for n in cpu.peca.interfaces["AUX"].sinais]
+    mapa += [(n, next(ctl), "AUX", "AUX") for n in cpu.peca.interfaces["AUX"].sinais if not _relogio(n)]
     enlaces.append(("CPU-FPGA", "CPU", "FPGA", "PCH", mapa))
     return enlaces
 
 
-def _empacotar(canais_idx, canais, capacidade, ordem_destinos):
-    """Grupos inteiros, na ordem dos destinos, primeiro que couber."""
+def _relogio(nome):
+    return nome == "BCLK" or nome.startswith("REFCLK")
+
+
+def _empacotar(canais_idx, canais, capacidade, ordem_destinos, paradas_max=PARADAS_MAX):
+    """Grupos inteiros, na ordem dos destinos, primeiro que couber, até `paradas_max` destinos."""
     grupos = {}
     for i in canais_idx:
         c = canais[i]
@@ -260,7 +274,8 @@ def _empacotar(canais_idx, canais, capacidade, ordem_destinos):
         g = grupos[chave]
         if len(g) > capacidade:
             raise ValueError(f"grupo {chave[1]} tem {len(g)} canais e a fibra comporta {capacidade}")
-        if len(atual) + len(g) > capacidade:
+        destinos = {canais[i].destino for i in atual} | {canais[g[0]].destino}
+        if len(atual) + len(g) > capacidade or len(destinos) > paradas_max:
             fibras.append(atual)
             atual = []
         atual = atual + g

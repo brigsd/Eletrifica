@@ -11,11 +11,13 @@ import math
 from collections import defaultdict
 
 import numpy as np
+from scipy.optimize import linear_sum_assignment
 
 from modulos.conexoes.netlist import Netlist, Requisito, Sinal
 from modulos.conexoes.padroes import PADROES, padrao_do_pino
 from modulos.conexoes.posicao import Ocupacao, manhattan
 from modulos.optica import enlace as E
+from modulos.sistema.celula import chave as chave_da_celula
 
 # --- chip tradutor -----------------------------------------------------------
 VIAS_MAX = 96                 # vias (tx + rx) por chip
@@ -28,8 +30,8 @@ AQUECEDOR_MW = 3.0            # médio por anel (modulador ou filtro)
 CONTROLE_CHIP_W = 0.15        # lógica de travamento, DACs e ADCs dos anéis
 
 # --- célula e trilha da base -------------------------------------------------
-R_ON_CELULA_OHM = 5.0         # chave de sinal, por célula
-C_CELULA_FF = 60.0
+# a chave de cada célula vem de modulos.sistema.celula (uma especificação só)
+VERTICAL_FOTONICA_MM = 3.0    # do contato até a camada de fotônica, por dentro da base
 Z_TRILHA_OHM = {"se": 40.0, "diff": 85.0}
 PERDA_DB_MM_GHZ = 0.004       # linha fina em LCP
 CAMADAS_SINAL = 4
@@ -48,7 +50,7 @@ ALVO_LASER = (295.0, 25.0)
 
 # --- controle e energia ------------------------------------------------------
 DISPOSITIVOS_POR_I3C = 12
-CELULAS_POR_CADEIA = 512
+CELULAS_POR_MATRIZ = 4096     # endereçamento linha x coluna de um controlador regional
 MARGEM_REGULADOR = 1.25
 PULLUP_OHM = 1000.0
 
@@ -75,12 +77,18 @@ def _protocolo_dos_pinos(peca):
 
 
 class _Construtor:
-    def __init__(self, montagem, configuracao, plano, cfg_optica):
+    def __init__(self, montagem, configuracao, plano, cfg_optica, chave=None,
+                 posicionamento="ao_lado"):
+        if posicionamento not in ("ao_lado", "sob_peca"):
+            raise ValueError(posicionamento)
         self.m, self.cfg, self.plano, self.opt = montagem, configuracao, plano, cfg_optica
+        self.chave_celula = chave_da_celula(chave)
+        self.posicionamento = posicionamento
         self.nl = Netlist()
         self.pecas = {p.nome: p for p in configuracao.pecas}
         self.base = montagem.base
         self.oc = Ocupacao(self.base.largura, self.base.profundidade)
+        self.oc_fotonica = Ocupacao(self.base.largura, self.base.profundidade)   # camada interna
         for p in self.pecas.values():
             self.oc.ocupar_poligono(_contorno(p), p.nome)
         z = montagem.zonas.get("vrm_cpu")
@@ -89,7 +97,7 @@ class _Construtor:
         self.prot = {n: _protocolo_dos_pinos(p.peca) for n, p in self.pecas.items()}
         self.grade, self.espacamento = E.grade(cfg_optica)
         self.i3c = []            # [porta, dispositivos]
-        self.spi = []
+        self.reg_de_trilho = {}  # trilho -> regulador que o alimenta
         self.carga_trilho = defaultdict(float)     # trilho -> corrente (A)
         self._n = defaultdict(int)                 # contadores de vias e chaves por chip
         self.lambdas_tx = defaultdict(lambda: defaultdict(int))   # chip -> λ -> vias tx
@@ -109,32 +117,43 @@ class _Construtor:
         if not self.i3c or self.i3c[-1][1] >= DISPOSITIVOS_POR_I3C:
             n = len(self.i3c)
             self.nl.porta("ctl:fpga", f"i3c{n}", "controle", "sai", barramento="I3C",
-                          dispositivos_max=DISPOSITIVOS_POR_I3C)
+                          max_dispositivos=DISPOSITIVOS_POR_I3C)
             self.i3c.append([f"i3c{n}", 0])
         self.i3c[-1][1] += 1
         self.nl.ligar(("ctl:fpga", self.i3c[-1][0]), (bloco, porta), "trilha")
 
-    def _ctl_celula(self, bloco):
-        if not self.spi or self.spi[-1][1] >= CELULAS_POR_CADEIA:
-            n = len(self.spi)
-            self.nl.porta("ctl:fpga", f"spi{n}", "controle", "sai", barramento="cadeia",
-                          celulas_max=CELULAS_POR_CADEIA)
-            self.spi.append([f"spi{n}", 0])
-        self.spi[-1][1] += 1
-        self.nl.ligar(("ctl:fpga", self.spi[-1][0]), (bloco, "ctl"), "trilha")
+    def _ctl_celula(self, bloco, peca):
+        """Célula -> controlador regional da peça (matriz) -> I3C do FPGA."""
+        cid = f"ctl:cel:{peca}"
+        if cid not in self.nl.blocos:
+            pc = self.pecas[peca]
+            alvo = (pc.x, pc.y - pc.peca.profundidade / 2 - 6)
+            pos = self.oc.colocar(alvo, 4, 4, cid)
+            self.nl.bloco(cid, "controlador", pos, peca=peca, capacidades=["controle-celulas"],
+                          celulas=0)
+            self.nl.porta(cid, "ctl", "controle", "entra")
+            self.nl.porta(cid, "matriz", "controle", "sai", barramento="matriz",
+                          max_dispositivos=CELULAS_POR_MATRIZ)
+            self.nl.porta(cid, "vdd", "energia", "entra", tensao_v=1.8)
+            self._ctl_i3c(cid)
+            self._alimentar(cid, "vdd", "rail:aux:1V8", 0.02)
+        self.nl.blocos[cid].atributos["celulas"] += 1
+        self.nl.ligar((cid, "matriz"), (bloco, "ctl"), "trilha")
 
     def _alimentar(self, bloco, porta, trilho, corrente_a):
         if trilho not in self.nl.blocos and trilho in self.aux_alvos:
             v, alvo = self.aux_alvos[trilho]
             self.reg(trilho.replace("rail:", ""), v, alvo)
         self.nl.ligar((trilho, "rede"), (bloco, porta), "trilha")
+        self.nl.blocos[bloco].portas[porta].atributos["corrente_a"] = round(corrente_a, 5)
         self.carga_trilho[trilho] += corrente_a
 
     # ------------------------------------------------------------ infraestrutura
     def infraestrutura(self):
         nl = self.nl
         e12 = self.m.zonas.get("entrada_12v", {"x": 6, "y": 130})
-        nl.bloco("fonte:atx", "fonte", (e12["x"], e12["y"]), potencia_w=850)
+        nl.bloco("fonte:atx", "fonte", (e12["x"], e12["y"]), potencia_w=850,
+                 capacidades=["12V-cabo", "energia"])
         nl.porta("fonte:atx", "12v", "energia", "sai", tensao_v=12.0, corrente_a=60.0)
         nl.porta("fonte:atx", "pcie_12v", "energia", "sai", tensao_v=12.0, corrente_a=50.0)
         nl.bloco("rail:12V", "trilho", (e12["x"] + 8, e12["y"]), tensao_v=12.0)
@@ -142,28 +161,32 @@ class _Construtor:
         nl.ligar(("fonte:atx", "12v"), ("rail:12V", "rede"), "trilha")
 
         fpga = self.pecas["FPGA"]
-        nl.bloco("ctl:fpga", "controlador", (fpga.x, fpga.y), peca="FPGA",
-                 implementa=["sequenciamento-PWROK", "PCH/DMI", "SPI-UEFI", "I3C", "cadeias-celulas"])
+        caps = ["controle", "sequenciamento-PWROK", "SPD/I3C"]
+        if "XCVR" in fpga.peca.interfaces:          # DMI exige transceptores, não E/S comum
+            caps.append("PCH/DMI")
+        nl.bloco("ctl:fpga", "controlador", (fpga.x, fpga.y), peca="FPGA", capacidades=caps)
         nl.porta("ctl:fpga", "vdd", "energia", "entra", tensao_v=0.85)
         nl.porta("ctl:fpga", "spi_flash", "controle", "sai", barramento="SPI")
 
         z = self.m.zonas["vrm_cpu"]
         vx, vy = (z["x0"] + z["x1"]) / 2, (z["y0"] + z["y1"]) / 2
-        nl.bloco("ctl:vrm", "controlador", (vx, z["y0"] + 4), implementa=["VR-SVID"],
+        nl.bloco("ctl:vrm", "controlador", (vx, z["y0"] + 4), capacidades=["VR-SVID"],
                  fases=z.get("fases", 8))
         for s in ("svid_clk", "svid_data", "svid_alert"):
             nl.porta("ctl:vrm", s, "eletrico", "bidir" if s == "svid_data" else
-                     ("entra" if s == "svid_clk" else "sai"), padrao="SVID")
+                     ("entra" if s == "svid_clk" else "sai"),
+                     padrao="SVID-DATA" if s == "svid_data" else "SVID")
         nl.porta("ctl:vrm", "pwm", "controle", "sai", fases=z.get("fases", 8))
         nl.porta("ctl:vrm", "ctl", "controle", "entra")
         nl.porta("ctl:vrm", "vdd", "energia", "entra", tensao_v=3.3)
 
         cx, cy = self.oc.colocar((fpga.x + 30, fpga.y), 6, 6, "clk:ref")
-        nl.bloco("clk:ref", "relogio", (cx, cy), frequencia_mhz=100.0, jitter_fs=100.0)
+        nl.bloco("clk:ref", "relogio", (cx, cy), frequencia_mhz=100.0, jitter_fs=100.0,
+                 capacidades=["BCLK", "REFCLK"])
         nl.porta("clk:ref", "vdd", "energia", "entra", tensao_v=3.3)
         nl.porta("clk:ref", "ctl", "controle", "entra")
         fx, fy = self.oc.colocar((fpga.x, fpga.y - 28), 6, 5, "flash:uefi")
-        nl.bloco("flash:uefi", "flash", (fx, fy), capacidade_mb=32)
+        nl.bloco("flash:uefi", "flash", (fx, fy), capacidade_mb=32, capacidades=["firmware-UEFI"])
         nl.porta("flash:uefi", "spi", "controle", "entra", barramento="SPI")
         nl.porta("flash:uefi", "vdd", "energia", "entra", tensao_v=1.8)
         nl.ligar(("ctl:fpga", "spi_flash"), ("flash:uefi", "spi"), "trilha")
@@ -191,6 +214,7 @@ class _Construtor:
                     nl.ligar(("fonte:atx", "pcie_12v"), (rid, "rede"), "cabo")
                     potencia = t.tensao * t.corrente_max
                     self.carga_cabo = potencia / 12.0 / 0.9
+                    self._consumidor(nome, t, rid, self.carga_cabo)
                     continue
                 nl.bloco(rid, "trilho", (pc.x, pc.y), tensao_v=t.tensao, peca=nome,
                          trilho_peca=t.nome, corrente_a=t.corrente_max)
@@ -199,8 +223,8 @@ class _Construtor:
                     rg = "reg:CPU:VCCIN"
                     if rg not in nl.blocos:
                         nl.bloco(rg, "regulador", (vx, vy), tensao_v=t.tensao,
-                                 corrente_max_a=t.corrente_max * 1.2, fases=z.get("fases", 8),
-                                 controle="SVID")
+                                 corrente_max_a=0.0, fases=z.get("fases", 8),
+                                 controle="SVID", capacidades=["energia"])
                         nl.porta(rg, "vin", "energia", "entra", tensao_v=12.0)
                         nl.porta(rg, "vout", "energia", "sai", tensao_v=t.tensao)
                         nl.porta(rg, "ctl", "controle", "entra")
@@ -210,20 +234,36 @@ class _Construtor:
                     rg = f"reg:{pc.tipo}:{t.nome}"
                     if rg not in nl.blocos:
                         pos = self.oc.colocar((pc.x, pc.y - pc.peca.profundidade / 2 - 12), 6, 6, rg)
-                        nl.bloco(rg, "regulador", pos, tensao_v=t.tensao, corrente_max_a=0.0)
+                        nl.bloco(rg, "regulador", pos, tensao_v=t.tensao, corrente_max_a=0.0,
+                                 capacidades=["energia"])
                         nl.porta(rg, "vin", "energia", "entra", tensao_v=12.0)
                         nl.porta(rg, "vout", "energia", "sai", tensao_v=t.tensao)
                         nl.porta(rg, "ctl", "controle", "entra")
                         nl.ligar(("rail:12V", "rede"), (rg, "vin"), "trilha")
                         self._ctl_i3c(rg)
-                    nl.blocos[rg].atributos["corrente_max_a"] += t.corrente_max * MARGEM_REGULADOR
                 nl.ligar((rg, "vout"), (rid, "rede"), "trilha")
+                self.reg_de_trilho[rid] = rg
+                self._consumidor(nome, t, rid, t.corrente_max)
         self._alimentar("ctl:fpga", "vdd", "rail:FPGA:VCCINT", 0.0)
+
+    def _consumidor(self, peca, trilho, rid, corrente_a):
+        """Os pinos de alimentação de um trilho da peça, agregados num bloco só."""
+        pc = self.pecas[peca]
+        idx = [i for i, p in enumerate(pc.peca.pinos) if p.grupo == trilho.nome]
+        celulas = sum(len(pc.celulas_do_pino.get(i, [])) for i in idx)
+        bid = f"{peca}:{trilho.nome}"
+        self.nl.bloco(bid, "pino", (pc.x, pc.y), peca=peca, pino=trilho.nome, n_pinos=len(idx),
+                      n_celulas=celulas, chave=self.chave_celula.nome, r_on_ohm=self.chave_celula.r_on_ohm,
+                      c_ff=self.chave_celula.c_off_ff, origem=trilho.origem)
+        self.nl.porta(bid, "e", "energia", "entra", tensao_v=trilho.tensao if trilho.origem == "base"
+                      else 12.0)
+        self._alimentar(bid, "e", rid, corrente_a)
 
     def reg(self, nome, tensao, alvo):
         rg, rid = f"reg:{nome}", f"rail:{nome}"
         pos = self.oc.colocar(alvo, 6, 6, rg)
-        self.nl.bloco(rg, "regulador", pos, tensao_v=tensao, corrente_max_a=0.0)
+        self.nl.bloco(rg, "regulador", pos, tensao_v=tensao, corrente_max_a=0.0,
+                      capacidades=["energia"])
         self.nl.porta(rg, "vin", "energia", "entra", tensao_v=12.0)
         self.nl.porta(rg, "vout", "energia", "sai", tensao_v=tensao)
         self.nl.porta(rg, "ctl", "controle", "entra")
@@ -231,6 +271,7 @@ class _Construtor:
         self.nl.porta(rid, "rede", "energia", "bidir", tensao_v=tensao)
         self.nl.ligar(("rail:12V", "rede"), (rg, "vin"), "trilha")
         self.nl.ligar((rg, "vout"), (rid, "rede"), "trilha")
+        self.reg_de_trilho[rid] = rg
         self._ctl_i3c(rg)
         return rid
 
@@ -248,13 +289,14 @@ class _Construtor:
         n_cel = len(pc.celulas_do_pino.get(idx, []))
         nl.bloco(pid, "pino", xy, peca=peca, pino=nome)
         nl.porta(pid, "e", "eletrico", sentido, padrao=pad)
-        nl.bloco(cid, "celula", xy, peca=peca, n_celulas=n_cel, r_on_ohm=R_ON_CELULA_OHM,
-                 c_ff=C_CELULA_FF * n_cel)
+        # r_on e c_ff são por célula; o verificador combina as n_celulas em paralelo
+        nl.bloco(cid, "celula", xy, peca=peca, n_celulas=n_cel, r_on_ohm=self.chave_celula.r_on_ohm,
+                 c_ff=self.chave_celula.c_off_ff, chave=self.chave_celula.nome)
         nl.porta(cid, "pino", "eletrico", "bidir", padrao=pad)
         nl.porta(cid, "base", "eletrico", "bidir", padrao=pad)
         nl.porta(cid, "ctl", "controle", "entra")
         nl.ligar((pid, "e"), (cid, "pino"), "contato", n_celulas=n_cel)
-        self._ctl_celula(cid)
+        self._ctl_celula(cid, peca)
         modo = PADROES[pad].modo
         nl.bloco(tid, "trilha", xy, comprimento_mm=0.0, z_ohm=Z_TRILHA_OHM[modo],
                  perda_db_mm_ghz=PERDA_DB_MM_GHZ, camada=None, de=pid)
@@ -263,11 +305,17 @@ class _Construtor:
         nl.ligar((cid, "base"), (tid, "a"), "trilha")
         return tid
 
-    def _comprimento(self, tid, ate_xy, camada):
+    def _comprimento(self, tid, ate_xy, camada, vertical_mm=0.0):
         b = self.nl.blocos[tid]
-        b.atributos["comprimento_mm"] = round(manhattan(b.posicao, ate_xy), 2)
+        b.atributos["comprimento_mm"] = round(manhattan(b.posicao, ate_xy) + vertical_mm, 2)
         b.atributos["camada"] = camada
         b.atributos["ate"] = (round(ate_xy[0], 2), round(ate_xy[1], 2))
+
+    def _ate_chip(self, tid, chip):
+        """Trilha do pino até o chip: lateral na base, ou descendo até a camada de fotônica."""
+        ch = self.nl.blocos[chip]
+        vertical = VERTICAL_FOTONICA_MM if ch.atributos.get("camada") == "fotonica" else 0.0
+        self._comprimento(tid, ch.posicao, "sinal", vertical)
 
     # ------------------------------------------------------------------ chips
     def chips(self):
@@ -295,6 +343,7 @@ class _Construtor:
                 angulo = math.atan2(cy - pc.y, cx - pc.x)
                 grupos[tensao[(peca, f)]].append((angulo, n, f))
             k = 0
+            caixas_peca = []
             for v, lista in sorted(grupos.items()):
                 # fibras vizinhas no mesmo chip: cada chip atende um trecho contínuo da peça
                 lista.sort()
@@ -311,15 +360,44 @@ class _Construtor:
                     cx[0] += n
                     cx[1].append(f)
                 for usadas, fs in caixas:
-                    cid = f"tx:{peca}:{k}"
-                    k += 1
                     centro = np.mean([q for f in fs for q in pontos[(peca, f)]], axis=0)
+                    caixas_peca.append((v, tuple(centro), fs))
+            alvos = [c for _, c, _ in caixas_peca]
+            if self.posicionamento == "sob_peca":
+                # camada de fotônica dentro da base: uma grade de vagas debaixo da peça,
+                # cada grupo de pinos na vaga mais próxima (atribuição ótima)
+                vagas = self._vagas_sob(pc)
+                if len(vagas) >= len(caixas_peca):
+                    custo = np.array([[math.dist(a, s) for s in vagas] for a in alvos])
+                    lin, col = linear_sum_assignment(custo)
+                    alvos = [vagas[j] for _, j in sorted(zip(lin, col))]
+            for (v, centro, fs), alvo in zip(caixas_peca, alvos):
+                cid = f"tx:{peca}:{k}"
+                k += 1
+                if self.posicionamento == "sob_peca":
+                    pos = self.oc_fotonica.colocar(alvo, CHIP_MM[0], CHIP_MM[1], cid)
+                else:
                     pos = self.oc.colocar(self._fora_da_peca(pc, centro), CHIP_MM[0], CHIP_MM[1], cid)
-                    self._criar_chip(cid, peca, pos, v)
-                    self.chips_da_peca[peca].append(cid)
-                    for f in fs:
-                        self.chip_de[(peca, f)] = cid
+                self._criar_chip(cid, peca, pos, v)
+                self.chips_da_peca[peca].append(cid)
+                for f in fs:
+                    self.chip_de[(peca, f)] = cid
         self._saida_trilhas()
+
+    def _vagas_sob(self, pc, sobra_mm=2.0):
+        """Centros de uma grade de chips debaixo da peça (com uma pequena sobra na borda)."""
+        passo = CHIP_MM[0] + 1.2
+        out = []
+        w = pc.peca.largura + 2 * sobra_mm
+        d = pc.peca.profundidade + 2 * sobra_mm
+        nx = max(1, int((w - CHIP_MM[0]) // passo) + 1)
+        ny = max(1, int((d - CHIP_MM[1]) // passo) + 1)
+        for i in range(nx):
+            for j in range(ny):
+                lx = (i - (nx - 1) / 2) * passo
+                ly = (j - (ny - 1) / 2) * passo
+                out.append(tuple(round(float(q), 3) for q in _global(pc, lx, ly)))
+        return out
 
     @staticmethod
     def _fora_da_peca(pc, ponto):
@@ -338,7 +416,8 @@ class _Construtor:
         nl = self.nl
         nl.bloco(cid, "chip_tradutor", pos, peca=peca, vias_max=VIAS_MAX, largura_mm=CHIP_MM[0],
                  profundidade_mm=CHIP_MM[1], potencia_w=CONTROLE_CHIP_W, vddio_v=vddio,
-                 vias_tx=0, vias_rx=0)
+                 vias_tx=0, vias_rx=0,
+                 camada="fotonica" if self.posicionamento == "sob_peca" else "superficie")
         nl.porta(cid, "vdd", "energia", "entra", tensao_v=VDD_CHIP_V)
         nl.porta(cid, "vddio", "energia", "entra", tensao_v=vddio)
         nl.porta(cid, "ctl", "controle", "entra")
@@ -525,6 +604,7 @@ class _Construtor:
         canais = self.plano.canais
         self.chave = {}                  # (peca, pino) -> (chave, via_tx, via_rx)
         self.ca_por_chave = defaultdict(list)
+        trilhas_do_grupo = defaultdict(set)      # (enlace, grupo, peca) -> trilhas
         for i in self.rapidos:
             c = canais[i]
             f = c.fibra
@@ -539,7 +619,7 @@ class _Construtor:
                 sentido_pino = DIREITO[c.sentido] if lado == "a" else INVERSO[c.sentido]
                 tid = self.pino(peca, pino, sentido_pino, pad)
                 chip = self.chip_de[(peca, f)]
-                self._comprimento(tid, nl.blocos[chip].posicao, "sinal")
+                self._ate_chip(tid, chip)
                 t, r = self._papeis(c, lado)
                 atv = 0.5 if c.sentido == "duplo" else 1.0       # tx e rx se alternam
                 vtx = self._via(chip, "t", pad, c.lambda_idx, c.taxa_gbps, atv) if t else None
@@ -562,6 +642,7 @@ class _Construtor:
                 else:
                     nl.ligar((vrx, "e"), (tid, "b"), "trilha")
                 pontas[lado] = dict(peca=peca, pino=pino, tid=tid, vtx=vtx, vrx=vrx, ch=ch, chip=chip)
+                trilhas_do_grupo[(c.enlace, c.grupo, peca)].add(tid)
                 if c.papel in ("CA", "CS", "CK"):
                     chave_grupo = (c.enlace, c.grupo.rsplit("_", 1)[0])
                     ponto = (tid, "b") if lado == "a" else (vrx, "e")
@@ -598,7 +679,19 @@ class _Construtor:
             if c.sentido == "duplo":
                 s.caminhos["volta"] = caminho(dest, orig)
             nl.sinal(s)
+        self._casar_comprimentos(trilhas_do_grupo)
         self._detectores()
+
+    def _casar_comprimentos(self, grupos):
+        """Serpentina: dentro de um grupo síncrono, toda trilha fica com o comprimento da maior."""
+        for tids in grupos.values():
+            if len(tids) < 2:
+                continue
+            maior = max(self.nl.blocos[t].atributos["comprimento_mm"] for t in tids)
+            for t in tids:
+                a = self.nl.blocos[t].atributos
+                a["serpentina_mm"] = round(maior - a["comprimento_mm"], 2)
+                a["comprimento_mm"] = round(maior, 2)
 
     def _detectores(self):
         nl = self.nl
@@ -651,7 +744,7 @@ class _Construtor:
             if sentido == "volta":
                 sid = f"VRM.{porta}->CPU.{pino}"
                 orig, dest, cam = dest, orig, cam[::-1]
-            s = Sinal(sid, "AUX", pino, "SVID", orig, dest,
+            s = Sinal(sid, "AUX", pino, padrao_do_pino("AUX", pino), orig, dest,
                       ("ida", "volta") if sentido == "duplo" else ("ida",), "SVID")
             s.caminhos["ida"] = cam
             if sentido == "duplo":
@@ -704,6 +797,19 @@ class _Construtor:
             s.caminhos["volta"] = cam[::-1]
         nl.sinal(s)
 
+    def sideband(self):
+        """SPD de cada DIMM (HSCL/HSDA, I3C de 1,0 V) até pinos livres do FPGA, por trilha."""
+        if "FPGA" not in self.pecas:
+            return
+        usados = {c.pino_destino for c in self.plano.canais if c.destino == "FPGA"}
+        livres = iter(n for n in self.pecas["FPGA"].peca.interfaces["CTL"].sinais if n not in usados)
+        for dimm in sorted(n for n in self.pecas if n.startswith("DIMM")):
+            if "SPD" not in self.pecas[dimm].peca.interfaces:
+                continue
+            for pino, sentido in (("HSCL", "ida"), ("HSDA", "duplo")):
+                c = _CanalLento("FPGA-" + dimm, sentido, "AUX", pino, "SPD_" + dimm)
+                self._lento(c, "FPGA", next(livres), dimm, pino)
+
     def _aux_rail(self, v):
         for nome, tv in (("rail:aux:1V05", 1.05), ("rail:aux:1V1", 1.1), ("rail:aux:1V2", 1.2),
                          ("rail:aux:1V8", 1.8), ("rail:aux:3V3", 3.3)):
@@ -724,18 +830,19 @@ class _Construtor:
     # ------------------------------------------------------------------ relógios
     def relogios(self):
         nl = self.nl
-        alvos = [("CPU", "BCLK", "AUX")]
-        for peca in ("CPU", "GPU"):
-            for pino, prot in self.prot.get(peca, {}).items():
-                if pino.startswith("REFCLK"):
+        alvos = []
+        for peca in sorted(self.prot):
+            for pino, prot in sorted(self.prot[peca].items()):
+                if pino == "BCLK" or pino.startswith("REFCLK"):
                     alvos.append((peca, pino, prot))
         for n, (peca, pino, prot) in enumerate(alvos):
             nl.porta("clk:ref", f"out{n}", "eletrico", "sai", padrao="HCSL-100M")
             tid = self.pino(peca, pino, "entra", "HCSL-100M")
             self._comprimento(tid, nl.blocos["clk:ref"].posicao, CAMADA_LENTA)
             nl.ligar(("clk:ref", f"out{n}"), (tid, "b"), "trilha")
+            # relógios independentes: cada um é o seu próprio grupo
             s = Sinal(f"clk:ref.out{n}->{peca}.{pino}", prot, "REFCLK", "HCSL-100M",
-                      ("clk:ref", f"out{n}"), (f"{peca}:{pino}", "e"), ("ida",), "REFCLK")
+                      ("clk:ref", f"out{n}"), (f"{peca}:{pino}", "e"), ("ida",), f"REFCLK_{peca}_{pino}")
             s.caminhos["ida"] = [("clk:ref", f"out{n}"), (tid, "b"), (tid, "a"),
                                  (f"cel:{peca}:{pino}", "base"), (f"cel:{peca}:{pino}", "pino"),
                                  (f"{peca}:{pino}", "e")]
@@ -772,6 +879,7 @@ class _Construtor:
             linhas = int(np.ceil(usados / int(self.opt["lambdas_por_laser"])).sum())
             p_opt = linhas * float(self.opt["laser_mw"]) * 1e-3
             nl.bloco(lid, "laser", pos, lambdas_nm=lams, potencia_mw=float(self.opt["laser_mw"]),
+                     capacidades=["laser"],
                      canais_por_linha=int(self.opt["lambdas_por_laser"]), pentes=PENTES_POR_MODULO,
                      linhas_acesas=linhas,
                      potencia_eletrica_w=round(p_opt / LASER_EFICIENCIA + LASER_TEC_W, 2))
@@ -826,13 +934,16 @@ class _Construtor:
                 nl.requisitos.append(Requisito(chip, "controle", "ctl:fpga"))
 
     def fechar_reguladores(self):
-        """Dimensiona os reguladores auxiliares pela carga ligada aos seus trilhos."""
+        """Cada regulador pela carga ligada aos trilhos que ele alimenta, com margem."""
         nl = self.nl
+        por_reg = defaultdict(float)
         for rid, corrente in self.carga_trilho.items():
-            rg = rid.replace("rail:", "reg:")
-            if rg in nl.blocos and nl.blocos[rg].atributos.get("corrente_max_a", 0) == 0:
-                nl.blocos[rg].atributos["corrente_max_a"] = round(corrente * MARGEM_REGULADOR, 3)
             nl.blocos[rid].atributos["carga_a"] = round(corrente, 3)
+            if rid in self.reg_de_trilho:
+                por_reg[self.reg_de_trilho[rid]] += corrente
+        for rg, corrente in por_reg.items():
+            nl.blocos[rg].atributos["corrente_max_a"] = round(corrente * MARGEM_REGULADOR, 3)
+            nl.blocos[rg].atributos["carga_a"] = round(corrente, 3)
 
     # ---------------------------------------------------------------- requisitos
     def requisitos(self):
@@ -844,18 +955,32 @@ class _Construtor:
               Requisito("CPU", "sequenciamento-PWROK", "ctl:fpga")]
         for nome in self.pecas:
             if nome.startswith("DIMM"):
-                R.append(Requisito(nome, "SPD/I3C", None))
-        R += [Requisito("GPU", "raiz-PCIe", "CPU:PEG_TX0"),
+                tem = all(f"{nome}:{p}" in self.nl.blocos for p in ("HSCL", "HSDA"))
+                R.append(Requisito(nome, "SPD/I3C", "ctl:fpga" if tem else None))
+        raiz = "CPU:PEG_TX0"
+        if raiz in self.nl.blocos:
+            self.nl.blocos[raiz].atributos["capacidades"] = ["raiz-PCIe"]
+        R += [Requisito("GPU", "raiz-PCIe", raiz if raiz in self.nl.blocos else None),
               Requisito("GPU", "12V-cabo", "fonte:atx")]
 
 
-def construir(montagem, configuracao, plano, cfg_optica):
-    c = _Construtor(montagem, configuracao, plano, cfg_optica)
+class _CanalLento:
+    """O mínimo de um canal do roteamento, para sinais que só existem na base."""
+
+    def __init__(self, enlace, sentido, protocolo, papel, grupo):
+        self.enlace, self.sentido, self.protocolo, self.papel, self.grupo = \
+            enlace, sentido, protocolo, papel, grupo
+
+
+def construir(montagem, configuracao, plano, cfg_optica, chave=None, posicionamento="ao_lado"):
+    """chave: nome em modulos.sistema.celula.CHAVES; posicionamento: "ao_lado" | "sob_peca"."""
+    c = _Construtor(montagem, configuracao, plano, cfg_optica, chave, posicionamento)
     c.infraestrutura()
     c.chips()
     c.fibras()
     c.sinais_rapidos()
     c.sinais_lentos()
+    c.sideband()
     c.relogios()
     c.laser()
     c.energia_chips()
