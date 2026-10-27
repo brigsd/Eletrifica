@@ -193,6 +193,7 @@
       new THREE.MeshLambertMaterial({ color: 0xc9a227, transparent: true, opacity: 0.55 }));
     elast.position.z = 0.2;
     g.add(elast);
+    g.userData.elast = elast;
     const mat = new THREE.MeshLambertMaterial({ color: new THREE.Color(p.cor), emissive: 0x000000 });
     const corpo = new THREE.Mesh(new THREE.BoxGeometry(p.largura, p.profundidade, p.altura), mat);
     corpo.position.z = 0.4 + p.altura / 2;
@@ -203,6 +204,7 @@
         new THREE.MeshLambertMaterial({ color: 0x59626b, transparent: true, opacity: 0.85 }));
       moldura.position.z = 1.25;
       g.add(moldura);
+      g.userData.moldura = moldura;
     }
     const lb = rotulo(p.nome);
     lb.position.set(0, 0, 0.4 + p.altura + 6);
@@ -290,11 +292,13 @@
     info.classList.remove("on");
     document.querySelectorAll("label.item").forEach(l => l.classList.remove("sel"));
   };
+  const num = (v, casas) => Number(v).toLocaleString("pt-BR",
+    { minimumFractionDigits: casas ?? 0, maximumFractionDigits: casas ?? 2 });
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   function mostrar(nome) {
     const p = byName[nome].p;
     const trilhos = p.trilhos.map(t =>
-      `<tr><td>${esc(t.nome)}</td><td>${t.tensao} V · até ${t.corrente_max} A · ${t.origem === "cabo" ? "pelo cabo" : "pela base"}</td></tr>`).join("");
+      `<tr><td>${esc(t.nome)}</td><td>${num(t.tensao)} V · até ${num(t.corrente_max)} A · ${t.origem === "cabo" ? "pelo cabo" : "pela base"}</td></tr>`).join("");
     const met = Object.entries(p.metricas).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("");
     infoBody.innerHTML = `
       <div class="ref">${esc(p.nome)} · ${esc(p.tipo)}</div>
@@ -302,7 +306,7 @@
       <p>${esc(p.descricao)}</p>
       <table>
         <tr><td>pinos</td><td>${p.pinos.energia || 0} energia · ${p.pinos.terra || 0} terra · ${p.pinos.sinal || 0} sinal</td></tr>
-        <tr><td>posição</td><td>${p.x.toFixed(2)}, ${p.y.toFixed(2)} mm · ${p.rot.toFixed(2)}°</td></tr>
+        <tr><td>posição</td><td>${num(p.x, 2)}; ${num(p.y, 2)} mm · ${num(p.rot, 2)}°</td></tr>
         ${trilhos}${met}
       </table>`;
     info.classList.add("on");
@@ -335,7 +339,13 @@
     botoes.forEach((b, j) => { b.classList.toggle("on", j === i); b.classList.toggle("done", j < i); });
     camadaEtapa = et.camada || "funcoes"; aplicarCamada();
     const energ = new Set(et.energizadas || []);
-    Object.values(byName).forEach(({ p, mat }) => mat.emissive.setHex(energ.has(p.nome) ? 0x2a1400 : 0x000000));
+    Object.values(byName).forEach(({ p, g, mat }) => {
+      g.userData.elast.visible = !et.transparente;
+      if (g.userData.moldura) g.userData.moldura.visible = !et.transparente;
+      mat.emissive.setHex(energ.has(p.nome) ? 0x2a1400 : 0x000000);
+      mat.transparent = !!et.transparente; mat.opacity = et.transparente ? 0.22 : 1;
+      mat.depthWrite = !et.transparente; mat.needsUpdate = true;
+    });
     const ativos = new Set(et.enlaces_ativos || []);
     fibras.forEach(fb => ligarFibra(fb, ativos.has(fb.f.tipo)));
     stepinfo.innerHTML = `<b>${esc(et.nome)}</b> · t = ${esc(et.t)} — ${esc(et.descricao)}`;

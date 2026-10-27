@@ -24,5 +24,6 @@
                 "kp": 1.5, "rampa_aquisicao_mw_us": 0.02}
   },
   "original": {"lambdas_por_laser": 64, "laser_mw": 10.0, "perdas_db": 10.0},
-  "ajustada": {"lambdas_por_laser": 16, "laser_mw": 10.0, "perdas_db": 7.5}
+  "ajustada": {"lambdas_por_laser": 16, "laser_mw": 10.0, "perdas_db": 7.5},
+  "viavel": {"canais_por_fibra": 16, "lambdas_por_laser": 4, "laser_mw": 10.0, "perdas_db": 7.5}
 }

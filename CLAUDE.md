@@ -53,8 +53,13 @@ arquivo junto** — é ele que segura o contexto entre sessões e entre agentes.
 modulos/      ferramentas por objetivo; cada pasta é um módulo Python
   caminhos.py   RAIZ, PROJETOS, BUILD — use isto, não monte caminho na mão
   pcb/          engenharia reversa de PCB a partir do Gerber
+  componentes/  modelos das peças do projeto óptico
+  sistema/      base de células, sondagem, identificação, simulação completa
+  energia/ termico/ optica/ dados/   simuladores
+  visual/       cena 3D e gráficos SVG
 projetos/     um diretório por projeto (dados de origem + saídas geradas + visualizador)
   cnc-laser/    gerber/, hardware/, docs/, web/, index.html, README.md
+  interconexao-optica/   montagem.json, enlace.json, docs/, web/, index.html, README.md
 tests/        pytest; `python3 -m pytest` na raiz
 vendor/three/ three.js r128 versionado, compartilhado pelos visualizadores
 scratch/      rascunho, ignorado pelo git (só o README é versionado)
@@ -101,8 +106,9 @@ python3 -m modulos.pcb.check_copper     # geometria do cobre x netlist   -> 43/4
 ```
 
 As duas também rodam pelo `pytest` (`tests/test_pcb.py`; a do esquemático é
-pulada se não houver `kicad-cli`). `check_copper` foi conferido como 43/43 depois
-da reestruturação. **Rode antes de afirmar** — o resultado de agora é o que conta.
+pulada se não houver `kicad-cli`). As duas foram conferidas (43/43 e netlists
+idênticas) depois da reestruturação. `python3 -m pytest` roda a suíte inteira
+(~100 s; `-m "not lento"` pula as mais demoradas). **Rode antes de afirmar** — o resultado de agora é o que conta.
 
 `check_copper` é independente do arquivo de netlist: rasteriza o cobre pelas
 aberturas do próprio Gerber e só usa coordenadas.
@@ -132,6 +138,41 @@ Detalhes em `projetos/cnc-laser/docs/analise.md`.
 | `verify_netlist.py` · `check_copper.py` | As duas verificações |
 
 Dependências em `requirements.txt`, mais o `kicad-cli` do KiCad 7+.
+
+---
+
+## Projeto `interconexao-optica`
+
+Emulador de uma base modular que substitui a placa-mãe: CPU i5-13600KF, 2 DDR5,
+GPU com 12 chips GDDR7 e um FPGA encaixados em qualquer posição sobre células
+chaveadas; dados por fibra óptica. O conceito do dono está em
+`projetos/interconexao-optica/docs/conceito.md` (cópia do documento
+<https://claude.ai/artifact/3NMHV7qQad9bxKu82cApAJ>).
+
+Fontes: `montagem.json` (onde cada peça foi encaixada) e `enlace.json`
+(parâmetros ópticos). Tudo o mais é gerado por:
+
+```bash
+python3 -m modulos.sistema.simular    # ~30 s: docs/resultados.md, docs/*.svg, web/
+```
+
+Regras do modelo:
+
+- **A sondagem não vaza a verdade.** `mapeamento.sondar` é o único lugar que lê
+  a montagem real; a identificação, a configuração e tudo depois dela usam só o
+  que a sondagem devolve. Não atalhe isso.
+- **Pinagens sintéticas.** Contagem, passo e proporção energia/terra/sinal
+  seguem cada encapsulamento; a posição de cada sinal não é a do datasheet.
+- `calculo_simples` reproduz o cálculo do documento; `orcamento` é o modelo
+  físico. Os dois aparecem lado a lado no relatório.
+
+Resultados atuais (confira rodando, não confie nestes números):
+
+- 17/17 peças identificadas, erro de µm.
+- 64 λ por fibra **não fecha** no modelo físico (diafonia); a configuração
+  `viavel` (16 λ/fibra, 4 canais por laser) dá ~+2,9 dB em PAM3.
+- Controle térmico por anel é obrigatório (< 1 K de janela sem ele).
+- A 200 A, ~21 pinos de VCCIN passam de 1 A.
 
 ---
 
