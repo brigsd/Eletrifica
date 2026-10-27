@@ -1,0 +1,552 @@
+"""Boot da base como máquina de estados por eventos, em cima da netlist do sistema.
+
+Nada aqui conhece ids fixos: quem alimenta quem, quem controla quem e de onde
+vem a luz de cada tradutor saem da topologia da netlist (ligações por domínio).
+Cada transição tem uma guarda; guarda que falha para o boot com o motivo e o
+bloco culpado.
+
+    from modulos.sistema.boot import emular
+    ex = emular(netlist, sim={"aneis_travamento_us": 200.0}, falhas=("laser:0",))
+
+Falhas injetáveis: id de bloco (fica morto), "lig:A|B" (corta as ligações
+entre os blocos A e B), "req:PECA:CAPACIDADE" (requisito fica sem provedor),
+"sondagem" (a sondagem não termina).
+"""
+from dataclasses import dataclass, field
+
+# tempos típicos (µs); `sim` sobrescreve os que foram medidos
+PADRAO = {
+    "tempo_sonda_por_celula_us": 2.0,
+    "sondagem_us": None,               # None = células x tempo por célula
+    "identificacao_us": 2_000.0,
+    "configuracao_celulas_us": 1_000.0,
+    "fonte_us": 100_000.0,             # PS_ON -> PWR_OK de uma fonte ATX
+    "partida_suave_us": 1_000.0,       # por regulador
+    "firmware_us": 50_000.0,           # FPGA lê e confere o firmware
+    "rsmrst_us": 100.0,
+    "config_chip_us": 200.0,           # chip tradutor pelo barramento de controle
+    "laser_us": 500.0,
+    "aneis_travamento_us": 200.0,      # modulos.optica.controle_termico
+    "refclk_us": 1_000.0,
+    "pwrok_us": 100.0,
+    "svid_latencia_us": 50.0,
+    "vid_boot_v": 1.10,
+    "slew_mv_us": 10.0,                # modulos.energia.vrm
+    "vrm_assentamento_us": 9.8,        # modulos.energia.vrm
+    "pltrst_us": 1_000.0,
+    "treino_memoria_us": 200_000.0,
+    "treino_pcie_us": 100_000.0,
+    "treino_gddr7_us": 50_000.0,
+}
+
+PASSIVOS_OPTICOS = {"fibra", "divisor", "acoplador", "mux", "demux"}
+PASSIVOS_ELETRICOS = {"trilha", "celula", "conversor_nivel", "terminacao"}
+TIPO_ENLACE = {"DDR5-4800": "DDR5", "PCIe5": "PCIe", "GDDR7-32": "GDDR7",
+               "PCIe4": "AUX", "AUX": "AUX"}
+
+
+@dataclass
+class Execucao:
+    eventos: list = field(default_factory=list)     # (t_us, alvo, estado, detalhe)
+    etapas: list = field(default_factory=list)
+    ok: bool = False
+    parou_em: dict = None                           # {"etapa", "motivo", "bloco"}
+    tempos: dict = field(default_factory=dict)      # etapa -> t_us
+
+    def evento(self, t, alvo, estado, detalhe=""):
+        self.eventos.append((float(t), alvo, estado, detalhe))
+
+
+class _Parou(Exception):
+    def __init__(self, etapa, motivo, bloco=None):
+        super().__init__(motivo)
+        self.etapa, self.motivo, self.bloco = etapa, motivo, bloco
+
+
+class _Uniao:
+    def __init__(self):
+        self.pai = {}
+
+    def achar(self, a):
+        self.pai.setdefault(a, a)
+        while self.pai[a] != a:
+            self.pai[a] = self.pai[self.pai[a]]
+            a = self.pai[a]
+        return a
+
+    def unir(self, a, b):
+        ra, rb = self.achar(a), self.achar(b)
+        if ra != rb:
+            self.pai[ra] = rb
+
+
+class _Topologia:
+    """Leitura da netlist por domínio, já com as falhas aplicadas."""
+
+    def __init__(self, nl, falhas):
+        self.nl = nl
+        self.falhas = set(falhas)
+        cortes = {tuple(sorted(f[4:].split("|", 1))) for f in self.falhas if f.startswith("lig:")}
+        self.ligacoes = [l for l in nl.ligacoes
+                         if tuple(sorted((l.a[0], l.b[0]))) not in cortes]
+        self.uniao = {d: self._unir(d) for d in ("energia", "controle", "optico", "eletrico")}
+
+    def dominio(self, ponto):
+        b = self.nl.blocos.get(ponto[0])
+        p = b.portas.get(ponto[1]) if b else None
+        return p.dominio if p else None
+
+    def _unir(self, dominio):
+        u = _Uniao()
+        for l in self.ligacoes:
+            if self.dominio(l.a) == dominio and self.dominio(l.b) == dominio:
+                u.unir(l.a, l.b)
+        passivos = {"optico": PASSIVOS_OPTICOS, "eletrico": PASSIVOS_ELETRICOS}.get(dominio, ())
+        for b in self.nl.blocos.values():
+            if b.tipo in passivos:
+                pts = [(b.id, n) for n, p in b.portas.items() if p.dominio == dominio]
+                for p in pts[1:]:
+                    u.unir(pts[0], p)
+        return u
+
+    def rede(self, dominio, ponto):
+        return self.uniao[dominio].achar(tuple(ponto))
+
+    def portas(self, bloco, dominio, sentidos=("entra", "sai", "bidir")):
+        b = self.nl.blocos[bloco]
+        return [(bloco, n) for n, p in b.portas.items()
+                if p.dominio == dominio and p.sentido in sentidos]
+
+    def portas_com_filhos(self, bloco, dominio, sentidos):
+        out = self.portas(bloco, dominio, sentidos)
+        for f in self.nl.filhos(bloco):
+            out += self.portas(f.id, dominio, sentidos)
+        return out
+
+    def vivo(self, bloco):
+        return bloco in self.nl.blocos and bloco not in self.falhas
+
+
+def _peca_do_pino(b):
+    return b.atributos.get("peca") or b.id.split(":", 1)[0]
+
+
+def _ms(t_us):
+    if t_us < 1_000:
+        return f"{t_us:.0f} µs"
+    return f"{t_us / 1000:.1f} ms".replace(".", ",")
+
+
+def emular(netlist, sim=None, falhas=()):
+    cfg = dict(PADRAO)
+    cfg.update({k: v for k, v in (sim or {}).items() if v is not None})
+    ex = Execucao()
+    try:
+        _executar(netlist, cfg, _Topologia(netlist, falhas), ex)
+        ex.ok = True
+    except _Parou as p:
+        ex.parou_em = {"etapa": p.etapa, "motivo": p.motivo, "bloco": p.bloco}
+        t = ex.eventos[-1][0] if ex.eventos else 0.0
+        ex.evento(t, p.bloco or p.etapa, "parou", p.motivo)
+        anterior = ex.etapas[-1] if ex.etapas else {}
+        ex.etapas.append({"nome": f"Parou: {p.etapa}", "t": _ms(t), "camada": "funcoes",
+                          "descricao": p.motivo,
+                          "energizadas": anterior.get("energizadas", []),
+                          "enlaces_ativos": anterior.get("enlaces_ativos", [])})
+    ex.eventos.sort(key=lambda e: e[0])
+    return ex
+
+
+def _executar(nl, cfg, top, ex):
+    blocos = nl.blocos
+    tipo = lambda t: [b.id for b in nl.por_tipo(t)]
+    pinos = nl.por_tipo("pino")
+    pecas = sorted({_peca_do_pino(b) for b in pinos})
+
+    def etapa(nome, t, camada, descricao, energizadas=(), enlaces=(), transparente=False):
+        ex.tempos[nome] = t
+        e = {"nome": nome, "t": _ms(t), "camada": camada, "descricao": descricao,
+             "energizadas": sorted(energizadas), "enlaces_ativos": sorted(enlaces)}
+        if transparente:
+            e["transparente"] = True
+        ex.etapas.append(e)
+
+    # ---- requisitos ------------------------------------------------------------
+    def requisitos(peca=None, cap=None):
+        return [r for r in nl.requisitos
+                if (peca is None or r.peca == peca) and (cap is None or r.capacidade == cap)]
+
+    def req_ok(r):
+        if f"req:{r.peca}:{r.capacidade}" in top.falhas or r.provedor is None:
+            return False, f"{r.peca} precisa de {r.capacidade} e ninguém provê"
+        if not top.vivo(r.provedor):
+            return False, f"o provedor de {r.capacidade} ({r.provedor}) não responde"
+        return True, ""
+
+    def exigir(etapa_, cap, pecas_=None, obrigatorio=True):
+        alvos = pecas_ if pecas_ is not None else sorted({r.peca for r in requisitos(cap=cap)})
+        for peca in alvos:
+            rs = requisitos(peca, cap)
+            if not rs:
+                if obrigatorio:
+                    raise _Parou(etapa_, f"{peca} precisa de {cap} e a netlist não declara provedor", peca)
+                continue
+            for r in rs:
+                ok, motivo = req_ok(r)
+                if not ok:
+                    raise _Parou(etapa_, motivo, r.provedor or peca)
+
+    def pecas_com(cap):
+        return sorted({r.peca for r in requisitos(cap=cap)} & set(pecas))
+
+    # ---- 1-3. sondagem, identificação, configuração ----------------------------
+    celulas = nl.por_tipo("celula")
+    n_cel = sum(int(b.atributos.get("n_celulas", 1)) for b in celulas)
+    t = cfg["sondagem_us"] or n_cel * cfg["tempo_sonda_por_celula_us"]
+    if "sondagem" in top.falhas:
+        raise _Parou("Sondagem", "a sondagem não terminou: nenhuma célula foi identificada")
+    ex.evento(0.0, "base", "sondando", f"{n_cel} células")
+    etapa("Sondagem", 0.0, "sondagem", f"Sinal de teste fraco em {n_cel} células; nada energizado.",
+          transparente=True)
+    ex.evento(t, "base", "sondada")
+    etapa("Identificação", t, "sondagem", f"{len(pecas)} peças reconhecidas pelo padrão terra/energia/sinal.")
+    t += cfg["identificacao_us"]
+    ex.evento(t, "base", "identificada", ", ".join(pecas))
+    t += cfg["configuracao_celulas_us"]
+    for c in celulas:
+        ex.evento(t, c.id, "configurada")
+    etapa("Configuração", t, "funcoes", f"{len(celulas)} grupos de células configurados; só agora podem energizar.",
+          transparente=True)
+
+    # ---- 4. fonte -----------------------------------------------------------------
+    fontes = [f for f in tipo("fonte") if top.vivo(f)]
+    if not fontes:
+        raise _Parou("Fonte", "nenhuma fonte de 12 V viva na netlist", (tipo("fonte") or [None])[0])
+    t_fonte = t + cfg["fonte_us"]
+    for f in fontes:
+        ex.evento(t_fonte, f, "power-good", "12 V")
+
+    # ---- energia: redes, motoristas e regiões ----------------------------------
+    pg = {}                                          # regulador -> t power-good (None = nunca)
+
+    def t_rede(ponto):
+        """Instante em que a rede de energia do ponto fica boa (None = nunca)."""
+        raiz = top.rede("energia", ponto)
+        melhores = []
+        for b in blocos.values():
+            if b.tipo not in ("fonte", "regulador"):
+                continue
+            for p in top.portas(b.id, "energia", ("sai",)):
+                if top.rede("energia", p) == raiz:
+                    if b.tipo == "fonte" and top.vivo(b.id):
+                        melhores.append(t_fonte)
+                    elif b.tipo == "regulador" and pg.get(b.id) is not None:
+                        melhores.append(pg[b.id])
+        return min(melhores) if melhores else None
+
+    def t_alimentado(bloco, filhos=False):
+        entradas = (top.portas_com_filhos(bloco, "energia", ("entra",)) if filhos
+                    else top.portas(bloco, "energia", ("entra",)))
+        if not entradas:
+            return None
+        ts = [t_rede(p) for p in entradas]
+        return None if any(x is None for x in ts) else max(ts)
+
+    def motoristas(ponto):
+        raiz = top.rede("energia", ponto)
+        return [b.id for b in nl.por_tipo("regulador")
+                if any(top.rede("energia", p) == raiz for p in top.portas(b.id, "energia", ("sai",)))]
+
+    controladores = tipo("controlador")
+    flash = tipo("flash")
+    fpga = None
+    for c in controladores:
+        rc = {top.rede("controle", p) for p in top.portas(c, "controle")}
+        re_ = {top.rede("eletrico", p) for p in top.portas(c, "eletrico")}
+        for f in flash:
+            if ({top.rede("controle", p) for p in top.portas(f, "controle")} & rc or
+                    {top.rede("eletrico", p) for p in top.portas(f, "eletrico")} & re_):
+                fpga = c
+    if fpga is None:
+        prov = [r.provedor for r in requisitos(cap="firmware-UEFI") if r.provedor in controladores]
+        fpga = prov[0] if prov else (controladores[0] if controladores else None)
+    if fpga is None:
+        raise _Parou("Standby", "não há controlador (FPGA) na netlist")
+
+    standby, fila = set(), [fpga] + flash
+    while fila:
+        b = fila.pop()
+        for p in top.portas(b, "energia", ("entra",)):
+            for r in motoristas(p):
+                if r not in standby:
+                    standby.add(r)
+                    fila.append(r)
+
+    vr = [r.provedor for r in requisitos(cap="VR-SVID") if r.provedor in blocos]
+    svid = set()
+    for v in vr:
+        if blocos[v].tipo == "regulador":
+            svid.add(v)
+        rv = {top.rede("controle", p) for p in top.portas(v, "controle")}
+        for r in tipo("regulador"):
+            if {top.rede("controle", p) for p in top.portas(r, "controle")} & rv:
+                svid.add(r)
+    principais = [r for r in tipo("regulador") if r not in standby and r not in svid]
+
+    def subir(regs, t_habilita):
+        pend = list(regs)
+        while pend:
+            avancou = False
+            for r in list(pend):
+                if not top.vivo(r):
+                    pg[r] = None
+                    ex.evento(t_habilita, r, "sem power-good", "falha injetada")
+                    pend.remove(r)
+                    avancou = True
+                    continue
+                tv = t_alimentado(r)
+                if tv is not None:
+                    pg[r] = max(tv, t_habilita) + cfg["partida_suave_us"]
+                    tens = blocos[r].atributos.get("tensao_v")
+                    ex.evento(pg[r], r, "power-good", f"{tens} V" if tens else "")
+                    pend.remove(r)
+                    avancou = True
+            if not avancou:
+                for r in pend:
+                    pg[r] = None
+                    ex.evento(t_habilita, r, "sem entrada", "o trilho de entrada nunca fica bom")
+                break
+
+    # ---- 5. standby e FPGA ------------------------------------------------------
+    subir(standby, t_fonte)
+    t_fpga = t_alimentado(fpga)
+    if t_fpga is None or not top.vivo(fpga):
+        culpado = next((r for r in standby if pg.get(r) is None), fpga)
+        raise _Parou("Standby", f"o FPGA ({fpga}) não recebe alimentação de standby", culpado)
+    ex.evento(t_fpga, fpga, "ligado")
+    pecas_fpga = [p for p in pecas if p.upper().startswith("FPGA")]
+    etapa("Fonte e standby", t_fpga, "funcoes", f"12 V da fonte e trilhos de standby; {fpga} ligado.",
+          energizadas=pecas_fpga)
+
+    # ---- 6. firmware e RSMRST# --------------------------------------------------
+    exigir("Firmware", "firmware-UEFI")
+    for f in flash:
+        if t_alimentado(f) is None:
+            raise _Parou("Firmware", f"a flash do firmware ({f}) está sem alimentação", f)
+    t_fw = t_fpga + cfg["firmware_us"]
+    ex.evento(t_fw, fpga, "firmware carregado")
+    t_rsm = t_fw + cfg["rsmrst_us"]
+    ex.evento(t_rsm, fpga, "RSMRST# solto")
+
+    # ---- 7. reguladores principais ---------------------------------------------
+    subir(principais, t_rsm)
+    bons = [pg[r] for r in principais if pg.get(r) is not None]
+    t_trilhos = max(bons + [t_rsm])
+    energ = {}
+
+    def t_energia_peca(peca):
+        for r in requisitos(peca, "energia"):
+            if r.provedor in pg:
+                return pg[r.provedor]
+            if r.provedor in blocos:
+                if blocos[r.provedor].tipo == "fonte":
+                    return t_fonte if top.vivo(r.provedor) else None
+                ps = top.portas(r.provedor, "energia")
+                return t_rede(ps[0]) if ps else None
+        return t_trilhos
+
+    for p in pecas:
+        te = t_energia_peca(p)
+        if te is not None and te <= t_trilhos:
+            energ[p] = te
+    etapa("Trilhos principais", t_trilhos, "funcoes",
+          f"{sum(pg.get(r) is not None for r in principais)} de {len(principais)} reguladores principais com power-good.",
+          energizadas=list(energ) + pecas_fpga)
+
+    # ---- 8. chips tradutores ------------------------------------------------------
+    rede_fpga = {top.rede("controle", p) for p in top.portas(fpga, "controle")}
+    chips = tipo("chip_tradutor")
+    t_cfg = {}
+    for c in chips:
+        if not top.vivo(c):
+            raise _Parou("Tradutores", f"o chip tradutor {c} não responde", c)
+        tp = t_alimentado(c, filhos=True)
+        if tp is None:
+            sem = [p for p in top.portas_com_filhos(c, "energia", ("entra",)) if t_rede(p) is None]
+            culpado = next((m for p in sem for m in motoristas(p)), c)
+            raise _Parou("Tradutores", f"o chip tradutor {c} está sem alimentação", culpado)
+        ctl = top.portas_com_filhos(c, "controle", ("entra", "bidir"))
+        if not ctl or not ({top.rede("controle", p) for p in ctl} & rede_fpga):
+            raise _Parou("Tradutores", f"o chip tradutor {c} não tem caminho de controle até o {fpga}", c)
+        t_cfg[c] = max(tp, t_rsm) + cfg["config_chip_us"]
+        ex.evento(t_cfg[c], c, "configurado", "polarização, aquecedores e monitores")
+    t_chips = max(t_cfg.values(), default=t_trilhos)
+
+    # ---- 9. lasers e anéis --------------------------------------------------------
+    t_laser = {}
+    for l in tipo("laser"):
+        tp = t_alimentado(l)
+        if not top.vivo(l) or tp is None:
+            t_laser[l] = None
+            ex.evento(t_chips, l, "apagado", "falha injetada" if not top.vivo(l) else "sem alimentação")
+            continue
+        t_laser[l] = max(tp, t_rsm) + cfg["laser_us"]
+        ex.evento(t_laser[l], l, "aceso")
+    etapa("Tradutores e lasers", max([t_chips] + [v for v in t_laser.values() if v]), "funcoes",
+          f"{len(chips)} chips tradutores configurados pelo {fpga}; "
+          f"{sum(v is not None for v in t_laser.values())} de {len(t_laser)} lasers acesos.",
+          energizadas=list(energ) + pecas_fpga)
+
+    saidas_laser = {}
+    for l in t_laser:
+        for p in top.portas(l, "optico", ("sai", "bidir")):
+            saidas_laser.setdefault(top.rede("optico", p), set()).add(l)
+    t_trava = {}
+    for c in chips:
+        entradas = [p for p in top.portas_com_filhos(c, "optico", ("entra", "bidir"))
+                    if p[1].startswith("laser")]
+        fontes_luz = set()
+        for p in entradas:
+            fontes_luz |= saidas_laser.get(top.rede("optico", p), set())
+        if not fontes_luz:
+            raise _Parou("Anéis", f"nenhuma luz de laser chega ao chip {c}", c)
+        apagados = sorted(l for l in fontes_luz if t_laser[l] is None)
+        if apagados:
+            raise _Parou("Anéis", f"os anéis do chip {c} não travam: o laser {apagados[0]} está apagado",
+                          apagados[0])
+        t_trava[c] = max([t_cfg[c]] + [t_laser[l] for l in fontes_luz]) + cfg["aneis_travamento_us"]
+        ex.evento(t_trava[c], c, "anéis travados")
+    t_aneis = max(t_trava.values(), default=t_chips)
+    etapa("Anéis travados", t_aneis, "temperatura",
+          f"Aquecedores varrem e travam os anéis dos {len(chips)} chips.",
+          energizadas=list(energ) + pecas_fpga)
+
+    # ---- 10. relógio de referência ------------------------------------------------
+    t_clk = None
+    for k in tipo("relogio"):
+        tp = t_alimentado(k)
+        if top.vivo(k) and tp is not None:
+            tk = max(tp, t_rsm) + cfg["refclk_us"]
+            t_clk = tk if t_clk is None else min(t_clk, tk)
+            ex.evento(tk, k, "estável", "100 MHz")
+    if t_clk is None:
+        raise _Parou("Relógio", "nenhum relógio de referência vivo e alimentado",
+                     (tipo("relogio") or [None])[0])
+    exigir("Relógio", "BCLK")
+
+    # ---- 11. PWROK -----------------------------------------------------------------
+    sem_pg = [r for r in principais if pg.get(r) is None]
+    if sem_pg:
+        raise _Parou("PWROK", f"PWROK segurado: o regulador {sem_pg[0]} não deu power-good", sem_pg[0])
+    exigir("PWROK", "sequenciamento-PWROK")
+    t_pwrok = max(t_trilhos, t_aneis, t_clk) + cfg["pwrok_us"]
+    ex.evento(t_pwrok, fpga, "PWROK")
+
+    # ---- 12. VCCIN pelo SVID ----------------------------------------------------
+    cpus = pecas_com("VR-SVID")
+    exigir("Núcleo da CPU", "VR-SVID", cpus)
+    t_vcc = t_pwrok
+    for r in sorted(svid):
+        if blocos[r].tipo != "regulador":
+            continue
+        if not top.vivo(r):
+            raise _Parou("Núcleo da CPU", f"o regulador {r} não sobe o VCCIN", r)
+        tv = t_alimentado(r)
+        if tv is None:
+            raise _Parou("Núcleo da CPU", f"o regulador {r} está sem entrada", r)
+        rampa = cfg["vid_boot_v"] * 1000 / cfg["slew_mv_us"]
+        pg[r] = max(tv, t_pwrok) + cfg["svid_latencia_us"] + rampa + cfg["vrm_assentamento_us"]
+        ex.evento(pg[r], r, "power-good", f"VID de boot {cfg['vid_boot_v']:.2f} V pelo SVID")
+        t_vcc = max(t_vcc, pg[r])
+    for p in pecas:
+        te = t_energia_peca(p)
+        if te is not None:
+            energ[p] = te
+    todas = sorted(set(energ) | set(pecas_fpga))
+    etapa("Núcleo da CPU", t_vcc, "corrente",
+          f"PWROK; a CPU pede o VID de boot pelo SVID e o VCCIN sobe a {cfg['slew_mv_us']:.0f} mV/µs.",
+          energizadas=todas, transparente=True)
+
+    # ---- 13. PLTRST# ----------------------------------------------------------------
+    exigir("PLTRST", "PCH/DMI", cpus)
+
+    def pecas_do_sinal(s):
+        return {s.origem[0].split(":", 1)[0], s.destino[0].split(":", 1)[0]}
+
+    def chips_do_sinal(s):
+        out = set()
+        for cam in s.caminhos.values():
+            for b, _ in cam:
+                blk = blocos.get(b)
+                if blk is None:
+                    continue
+                if blk.tipo == "chip_tradutor":
+                    out.add(b)
+                elif blk.pai and blocos.get(blk.pai) and blocos[blk.pai].tipo == "chip_tradutor":
+                    out.add(blk.pai)
+        return out
+
+    def conferir_sinais(etapa_, sinais):
+        for s in sinais:
+            if not s.caminhos or not all(s.caminhos.get(sd) for sd in s.sentidos):
+                raise _Parou(etapa_, f"o sinal {s.id} não tem caminho completo", s.id)
+            for c in chips_do_sinal(s):
+                if c not in t_trava:
+                    raise _Parou(etapa_, f"o sinal {s.id} passa pelo chip {c}, que não travou", c)
+
+    sinais_cpu = [s for s in nl.sinais.values() if pecas_do_sinal(s) & set(cpus)]
+    conferir_sinais("PLTRST", sinais_cpu)
+    clk_rede = {top.rede("eletrico", p) for k in tipo("relogio") if top.vivo(k)
+                for p in top.portas(k, "eletrico", ("sai", "bidir"))}
+    for cpu in cpus:
+        pinos_cpu = [b for b in pinos if _peca_do_pino(b) == cpu]
+        chega = any(top.rede("eletrico", pt) in clk_rede
+                    for b in pinos_cpu for pt in top.portas(b.id, "eletrico"))
+        if not chega:
+            raise _Parou("PLTRST", f"o relógio de referência não chega a nenhum pino da {cpu}", cpu)
+    t_plt = t_vcc + cfg["pltrst_us"]
+    ex.evento(t_plt, fpga, "PLTRST# solto")
+    etapa("Relógio e reset", t_plt, "funcoes",
+          "Relógio de 100 MHz estável, PWROK e PLTRST# soltos: a CPU começa a executar o firmware.",
+          energizadas=todas, enlaces=["AUX"])
+
+    # ---- 14. treino de memória --------------------------------------------------------
+    ddr = [s for s in nl.sinais.values() if s.protocolo == "DDR5-4800"]
+    dimms = sorted({p for s in ddr for p in pecas_do_sinal(s)} - set(cpus))
+    exigir("Treino da memória", "SPD/I3C", dimms)
+    conferir_sinais("Treino da memória", ddr)
+    if not ddr:
+        raise _Parou("Treino da memória", "não há nenhum sinal DDR5 na netlist", (cpus or [None])[0])
+    t_mem = t_plt + cfg["treino_memoria_us"]
+    for d in dimms:
+        ex.evento(t_mem, d, "treinado")
+    etapa("Treino da memória", t_mem, "funcoes",
+          f"A CPU varre o atraso do DQS em cada pista de {len(dimms)} módulos e grava o centro da janela.",
+          energizadas=todas, enlaces=["AUX", "DDR5"])
+
+    # ---- 15. PCIe e GDDR7 ------------------------------------------------------------
+    enlaces = {"AUX", "DDR5"}
+    t_fim = t_mem
+    pcie = [s for s in nl.sinais.values() if s.protocolo == "PCIe5"]
+    if pcie:
+        gpus = sorted({p for s in pcie for p in pecas_do_sinal(s)} - set(cpus))
+        exigir("PCIe", "raiz-PCIe", gpus, obrigatorio=False)
+        exigir("PCIe", "12V-cabo", gpus, obrigatorio=False)
+        conferir_sinais("PCIe", pcie)
+        t_fim = max(t_fim, t_mem + cfg["treino_pcie_us"])
+        for g in gpus:
+            ex.evento(t_mem + cfg["treino_pcie_us"], g, "enlace PCIe ativo", "Gen5 x16")
+        enlaces.add("PCIe")
+    g7 = [s for s in nl.sinais.values() if s.protocolo == "GDDR7-32"]
+    if g7:
+        conferir_sinais("GDDR7", g7)
+        t_g7 = t_mem + cfg["treino_pcie_us"] + cfg["treino_gddr7_us"]
+        t_fim = max(t_fim, t_g7)
+        ex.evento(t_g7, "GDDR7", "treinada")
+        enlaces.add("GDDR7")
+    etapa("PCIe e GDDR7", t_fim, "funcoes",
+          "Enlace PCIe até a GPU e treino da GDDR7 em PAM3." if pcie or g7 else "Sem PCIe nem GDDR7 nesta montagem.",
+          energizadas=todas, enlaces=enlaces)
+    ex.evento(t_fim, "sistema", "pronto")
+    etapa("Pronto", t_fim, "temperatura", f"Sistema ligado em {_ms(t_fim)}.",
+          energizadas=todas, enlaces=enlaces)
