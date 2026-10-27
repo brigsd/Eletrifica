@@ -10,13 +10,14 @@ As bibliotecas Python usadas pelos scripts (`gerbonara`, `cairosvg`, `numpy`,
 
 ---
 
-## 1. three.js — em `web/`
+## 1. three.js — em `vendor/three/`
 
 | | |
 |---|---|
 | Projeto | [three.js](https://threejs.org/) |
 | Versão | r128 (`three@0.128.0`) |
-| Arquivos | `web/three.min.js` · `web/OrbitControls.js` |
+| Arquivos | `vendor/three/three.min.js` · `vendor/three/OrbitControls.js` |
+| Usado por | os visualizadores em `projetos/*/index.html` |
 | Licença | MIT |
 
 `OrbitControls.js` vem de `examples/js/controls/` do mesmo pacote.
@@ -53,7 +54,7 @@ THE SOFTWARE.
 
 ---
 
-## 2. Símbolos do KiCad — dentro de `hardware/esp32-cnc-laser.kicad_sch`
+## 2. Símbolos do KiCad — dentro de `projetos/cnc-laser/hardware/esp32-cnc-laser.kicad_sch`
 
 | | |
 |---|---|
@@ -62,7 +63,7 @@ THE SOFTWARE.
 | Licença | CC-BY-SA 4.0 **com exceção** (texto abaixo) |
 
 Um arquivo `.kicad_sch` sempre carrega dentro de si a definição dos símbolos que
-usa, na seção `lib_symbols`. `tools/gen_schematic.py` copia essas definições da
+usa, na seção `lib_symbols`. `modulos/pcb/gen_schematic.py` copia essas definições da
 instalação local do KiCad para o arquivo gerado — é o que faz o esquemático
 abrir em qualquer máquina, sem depender de quais bibliotecas estão instaladas.
 
@@ -74,7 +75,7 @@ abrir em qualquer máquina, sem depender de quais bibliotecas estão instaladas.
 `power:+12V` · `power:+5V` · `power:GND`
 
 **Dois foram desenhados para este projeto**, porque não existem na biblioteca do
-KiCad — são gerados por `rect_symbol()` em `tools/gen_schematic.py`:
+KiCad — são gerados por `rect_symbol()` em `modulos/pcb/gen_schematic.py`:
 
 `Module:ESP32_DEVKIT_V1` (30 pinos) · `Module:A4988` (16 pinos)
 
@@ -97,9 +98,9 @@ Ou seja: usar esses símbolos **não obriga** este projeto a adotar CC-BY-SA.
 
 **MIT** — ver [`LICENSE`](LICENSE).
 
-Ela cobre o que foi criado aqui: os scripts em `tools/`, o visualizador, e os
-desenhos e documentos gerados em `docs/` e `hardware/`.
+Ela cobre o que foi criado aqui: os scripts em `modulos/`, os visualizadores,
+e os desenhos e documentos gerados em `projetos/`.
 
-**Não cobre o `gerber/`.** Aquele pacote é o projeto original da placa e
+**Não cobre o `projetos/cnc-laser/gerber/`.** Aquele pacote é o projeto original da placa e
 pertence a quem a desenhou — está no repositório como material de origem da
 engenharia reversa. O `LICENSE` diz isso explicitamente.

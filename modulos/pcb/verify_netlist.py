@@ -7,16 +7,13 @@ that the schematic invents no connection the board does not have.
 """
 import json
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-import ksym
-from gen_schematic import PARTS, RENAME, load_netlist
+from modulos.pcb import PROJETO, ksym
+from modulos.pcb.gen_schematic import PARTS, RENAME, load_netlist
 
-ROOT = Path(__file__).resolve().parent.parent
-SCH = ROOT / "hardware" / "esp32-cnc-laser.kicad_sch"
+SCH = PROJETO / "hardware" / "esp32-cnc-laser.kicad_sch"
 
 # symbol pin -> board pad, for the parts whose numbering had to be remapped
 INV_PINS = {meta["ref"]: {v: k for k, v in meta["pinmap"].items()}

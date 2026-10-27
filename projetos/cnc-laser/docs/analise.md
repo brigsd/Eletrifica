@@ -72,7 +72,7 @@ Isso foi verificado por dois caminhos independentes, que concordam:
 
 1. **`FlyingProbeTesting.json`** — o arquivo de teste que acompanha o Gerber,
    gerado pelo CAM a partir da placa, lista o net de cada pad. `SRC_Q1` tem 2 pads.
-2. **Geometria do cobre** (`tools/check_copper.py`) — rasteriza as duas camadas
+2. **Geometria do cobre** (`modulos/pcb/check_copper.py`) — rasteriza as duas camadas
    a partir das aberturas do Gerber, rotula as ilhas de cobre conectadas e une as
    faces nos furos metalizados e nas 9 vias. Esse método **não lê nenhum nome de
    net**, só coordenadas. Resultado: 43 ilhas para os 43 nets da placa, com
@@ -144,7 +144,7 @@ os capacitores estão mesmo debaixo dos drivers. Se a placa já foi montada e
 funciona, provavelmente foram usados capacitores baixos, barra mais alta, ou os
 capacitores foram deitados. Vale medir antes de comprar componente.
 
-Rodar `python3 tools/render_3d.py --steps` imprime essa conferência de folga.
+Rodar `python3 -m modulos.pcb.render_3d --steps` imprime essa conferência de folga.
 
 ### 🔵 8. Observações menores
 

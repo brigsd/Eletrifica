@@ -1,7 +1,8 @@
-# Only needed to re-run the tools in tools/; the schematic and the exported
-# SVG/PDF in docs/ are committed and need none of this.
+# Para rodar os modulos em modulos/ e os testes. As saidas geradas ja estao
+# commitadas em projetos/ e nao precisam de nada disto para serem vistas.
 gerbonara
 cairosvg
 numpy
 scipy
 pillow
+pytest

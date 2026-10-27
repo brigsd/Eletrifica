@@ -26,24 +26,25 @@ ESCOPO — o que esta licença cobre e o que não cobre
 
 Cobre o que foi criado neste projeto:
 
-  tools/          scripts de geração, verificação e desenho
-  index.html      visualizador 3D
-  web/board.json  geometria exportada
-  web/board-texture.*
-  docs/           desenhos e documentação gerados
-  hardware/       esquemático KiCad gerado
+  modulos/        scripts de geração, verificação, desenho e simulação
+  tests/          testes
+  index.html      página inicial
+  projetos/*/     visualizadores, dados exportados, desenhos e documentação
+                  gerados, esquemático KiCad gerado — exceto o que está
+                  listado abaixo
 
 NÃO cobre:
 
-  gerber/         O pacote Gerber é o projeto original da placa e pertence a
+  projetos/cnc-laser/gerber/
+                  O pacote Gerber é o projeto original da placa e pertence a
                   quem a desenhou. Ele está aqui como material de origem da
                   engenharia reversa, não como obra deste repositório, e esta
                   licença não concede direito nenhum sobre ele.
 
-  web/three.min.js e web/OrbitControls.js
+  vendor/three/three.min.js e vendor/three/OrbitControls.js
                   three.js, licença MIT própria — ver THIRD_PARTY.md.
 
-  Os símbolos do KiCad embutidos em hardware/*.kicad_sch
+  Os símbolos do KiCad embutidos em projetos/cnc-laser/hardware/*.kicad_sch
                   CC-BY-SA 4.0 com exceção — ver THIRD_PARTY.md.
 
 Uma observação sobre o esquemático e os desenhos: eles descrevem a placa de

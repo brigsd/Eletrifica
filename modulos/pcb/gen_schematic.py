@@ -7,17 +7,13 @@ in the schematic is the board's real connectivity -- nothing is inferred.
 Component values and part numbers come from the top silkscreen layer.
 """
 import json
-import sys
 import uuid
 from math import cos, radians, sin
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-import ksym
+from modulos.pcb import PROJETO, ksym
 
-ROOT = Path(__file__).resolve().parent.parent
-GERBER = ROOT / "gerber"
-OUT = ROOT / "hardware" / "esp32-cnc-laser.kicad_sch"
+GERBER = PROJETO / "gerber"
+OUT = PROJETO / "hardware" / "esp32-cnc-laser.kicad_sch"
 NS = uuid.UUID("6f1d4e8a-2b7c-4a19-9d3e-5c8a0b1f7e42")
 
 

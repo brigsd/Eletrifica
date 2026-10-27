@@ -10,7 +10,7 @@ height and the body shape of each part. Those are the usual dimensions for each
 package, listed in BODIES below. So the layout is exact and the parts are
 representative -- this is a drawing to look at, not a mechanical model.
 
-    python3 tools/render_3d.py
+    python3 -m modulos.pcb.render_3d
 """
 import json
 import math
@@ -19,9 +19,11 @@ from pathlib import Path
 
 from gerbonara import GerberFile
 
-ROOT = Path(__file__).resolve().parent.parent
-GERBER = ROOT / "gerber"
-OUT = ROOT / "docs"
+from modulos.caminhos import RAIZ as ROOT
+from modulos.pcb import PROJETO
+
+GERBER = PROJETO / "gerber"
+OUT = PROJETO / "docs"
 
 MIL = 39.3701
 THICK = 1.6                      # board thickness, mm

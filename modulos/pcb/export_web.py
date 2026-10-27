@@ -7,15 +7,11 @@ Everything comes from the same model the printed drawings use, so the page can
 never drift away from them.
 """
 import json
-import sys
-from pathlib import Path
+from modulos.pcb import PROJETO
+from modulos.pcb import render_3d as R
+from modulos.pcb.gen_schematic import PARTS, RENAME, load_netlist
 
-sys.path.insert(0, str(Path(__file__).parent))
-import render_3d as R
-from gen_schematic import PARTS, RENAME, load_netlist
-
-ROOT = Path(__file__).resolve().parent.parent
-WEB = ROOT / "web"
+WEB = PROJETO / "web"
 
 GROUPS = {
     "U1": "Controle", "DRV1": "Eixos", "DRV2": "Eixos", "M1": "Eixos", "M2": "Eixos",

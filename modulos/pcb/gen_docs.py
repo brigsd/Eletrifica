@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
 """Generate the BOM and the netlist table from the same source the schematic uses."""
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent))
-from gen_schematic import PARTS, RENAME, load_netlist
-
-ROOT = Path(__file__).resolve().parent.parent
+from modulos.pcb import PROJETO
+from modulos.pcb.gen_schematic import PARTS, RENAME, load_netlist
 
 DESC = {
     "J1": "Jack DC de alimentacao (12 V). O pino 3 e o terminal de comutacao do jack e nao esta ligado.",
@@ -48,7 +43,7 @@ def main():
     for ref in ORDER:
         m = meta_of[ref]
         lines.append(f"| {ref} | {m['value']} | `{silk_of[ref]}` | {len(pins_of[ref])} | {DESC[ref]} |")
-    (ROOT / "docs" / "bom.md").write_text("\n".join(lines) + "\n")
+    (PROJETO / "docs" / "bom.md").write_text("\n".join(lines) + "\n")
 
     by_net = {}
     for ref, pins in pins_of.items():
@@ -71,7 +66,7 @@ def main():
         (pin, PARTS[("ESP32 DEVKIT V1", 30)])
         for pin, raw in nets[("ESP32 DEVKIT V1", 30)].items() if raw.startswith("NET_"))
     out += ["", f"Pinos do ESP32 sem ligacao: {len(unused)} de 30.", ""]
-    (ROOT / "docs" / "netlist.md").write_text("\n".join(out) + "\n")
+    (PROJETO / "docs" / "netlist.md").write_text("\n".join(out) + "\n")
     print("wrote docs/bom.md and docs/netlist.md")
 
 

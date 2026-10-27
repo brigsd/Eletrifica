@@ -5,8 +5,8 @@ Draws the board the way a layout view usually looks: silkscreen underneath,
 copper traces over it, pads on top, board outline last. Every layer is rendered
 through the same forced bounding box so they line up exactly when stacked.
 
-    python3 tools/render_layout.py            # both faces on one drawing
-    python3 tools/render_layout.py --split    # one drawing per face as well
+    python3 -m modulos.pcb.render_layout            # both faces on one drawing
+    python3 -m modulos.pcb.render_layout --split    # one drawing per face as well
 """
 import argparse
 import re
@@ -14,9 +14,11 @@ from pathlib import Path
 
 from gerbonara import GerberFile
 
-ROOT = Path(__file__).resolve().parent.parent
-GERBER = ROOT / "gerber"
-OUT = ROOT / "docs"
+from modulos.caminhos import RAIZ as ROOT
+from modulos.pcb import PROJETO
+
+GERBER = PROJETO / "gerber"
+OUT = PROJETO / "docs"
 
 LAYERS = {
     "outline": "Gerber_BoardOutlineLayer.GKO",
