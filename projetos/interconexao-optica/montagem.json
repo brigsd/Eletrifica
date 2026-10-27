@@ -1,0 +1,27 @@
+{
+  "base": {"largura_mm": 320, "profundidade_mm": 240, "passo_celula_mm": 0.4,
+           "raio_contato_celula_mm": 0.12},
+  "pecas": [
+    {"id": "CPU",   "tipo": "i5-13600KF", "x": 120.0, "y": 130.0, "rot": 0.6},
+    {"id": "DIMM_A", "tipo": "DDR5-DIMM", "x": 215.0, "y": 140.0, "rot": 90.4},
+    {"id": "DIMM_B", "tipo": "DDR5-DIMM", "x": 250.0, "y": 140.0, "rot": 89.7},
+    {"id": "GPU",   "tipo": "GPU",        "x": 110.0, "y": 60.0,  "rot": 180.3},
+    {"id": "M0",  "tipo": "GDDR7", "x": 75.0,  "y": 42.0, "rot": 0.0},
+    {"id": "M1",  "tipo": "GDDR7", "x": 75.0,  "y": 57.0, "rot": 0.4},
+    {"id": "M2",  "tipo": "GDDR7", "x": 75.0,  "y": 72.0, "rot": -0.3},
+    {"id": "M3",  "tipo": "GDDR7", "x": 145.0, "y": 42.0, "rot": 180.0},
+    {"id": "M4",  "tipo": "GDDR7", "x": 145.0, "y": 57.0, "rot": 179.5},
+    {"id": "M5",  "tipo": "GDDR7", "x": 145.0, "y": 72.0, "rot": 180.2},
+    {"id": "M6",  "tipo": "GDDR7", "x": 87.0,  "y": 22.0, "rot": 90.0},
+    {"id": "M7",  "tipo": "GDDR7", "x": 102.0, "y": 22.0, "rot": 90.5},
+    {"id": "M8",  "tipo": "GDDR7", "x": 117.0, "y": 22.0, "rot": 89.6},
+    {"id": "M9",  "tipo": "GDDR7", "x": 132.0, "y": 22.0, "rot": 90.0},
+    {"id": "M10", "tipo": "GDDR7", "x": 95.0,  "y": 95.0, "rot": 270.0},
+    {"id": "M11", "tipo": "GDDR7", "x": 125.0, "y": 95.0, "rot": 270.3},
+    {"id": "FPGA", "tipo": "FPGA",        "x": 40.0,  "y": 190.0, "rot": 270.2}
+  ],
+  "zonas": {
+    "vrm_cpu": {"x0": 72, "y0": 112, "x1": 94, "y1": 148, "fases": 8},
+    "entrada_12v": {"x": 6, "y": 130}
+  }
+}
