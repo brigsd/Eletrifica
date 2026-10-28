@@ -184,6 +184,8 @@ def _icp(peca, pose, xy, cls, alcance, voltas=12):
             src.append(local[idx[j[ok]]])
             dst.append(xy[m][ok])
         src, dst = np.concatenate(src), np.concatenate(dst)
+        if len(src) < 3:            # hipótese sem casamento nenhum: nada a ajustar
+            break
         ms, md = src.mean(0), dst.mean(0)
         u, _, vt = np.linalg.svd((src - ms).T @ (dst - md))
         r = (u @ vt).T

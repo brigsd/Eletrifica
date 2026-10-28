@@ -410,8 +410,9 @@ def pch():
 
 def ponte_mem():
     """Ponte do banco unificado, chip do laboratório: do lado da CPU se apresenta como um DIMM
-    DDR5; do outro tem 12 portas GDDR7 até os chips do banco. BGA de 1600 bolas a 0,8 mm."""
-    nx, ny, passo = 40, 40, 0.8
+    DDR5; do outro tem 12 portas GDDR7 até os chips do banco. BGA de 1600 bolas a 1,0 mm: grande o
+    bastante para os tradutores das 12 portas caberem debaixo dela."""
+    nx, ny, passo = 40, 40, 1.0
     nome = _Contador()
     # o RESET dos chips do banco é só da GPU
     sinais = iter(_sinais_ddr5("DDR5") + ["HSCL", "HSDA"]
@@ -440,7 +441,7 @@ def ponte_mem():
     sinais_de = lambda g: [p.nome for p in pinos if p.grupo == g]
     return Componente(
         tipo="PONTE-MEM", nome="Ponte do banco unificado (DDR5 para GDDR7)",
-        largura=33.0, profundidade=33.0, altura=2.4, diametro_pad=0.45,
+        largura=41.0, profundidade=41.0, altura=2.4, diametro_pad=0.50,
         pinos=pinos,
         trilhos={"VCCINT": Trilho("VCCINT", 0.85, 12.0, "base"),
                  "VDDQ_DDR5": Trilho("VDDQ_DDR5", 1.1, 1.5, "base"),
