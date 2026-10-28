@@ -189,7 +189,8 @@ Regras do modelo:
 - **Contato imperfeito** (`modulos/sistema/defeitos.py`) altera a verdade antes
   da sondagem; peça recusada ou desconhecida não liga célula nenhuma.
 - Dois relatórios à parte, mais lentos, regenerados à mão:
-  `python3 -m modulos.conexoes.sensibilidade` (docs/sensibilidade.md, ~3 min) e
+  `python3 -m modulos.conexoes.sensibilidade` (docs/sensibilidade.md, ~10 min: refaz a
+  temperatura a cada variação) e
   `python3 -m modulos.sistema.levantamento_defeitos` (docs/defeitos.md, ~2 min).
 
 **Viabilidade prática:** `projetos/interconexao-optica/docs/viabilidade.md`
