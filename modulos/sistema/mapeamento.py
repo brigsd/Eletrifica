@@ -8,7 +8,7 @@ saem da sondagem. A identificação compara o padrão terra/energia/sinal com as
 pinagens do catálogo, em qualquer posição e rotação.
 """
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from scipy.optimize import minimize
@@ -30,29 +30,88 @@ class Sondagem:
     pontes: np.ndarray       # células que tocam dois nets: ficam fora
 
 
-def sondar(montagem, contatos, semente=0):
-    """Emula a sondagem. A verdade (nome de cada net) fica aqui dentro."""
+def _net(peca_k, p):
+    return (peca_k, p.grupo) if p.funcao != SINAL else (peca_k, p.nome)
+
+
+def sondar(montagem, contatos, semente=0, curtos=()):
+    """Emula a sondagem. A verdade (nome de cada net) fica aqui dentro.
+
+    `curtos`: condutores estranhos (partícula, rebarba), cada um uma lista de
+    (índice da peça, índice do pino) que ele liga entre si. Uma célula que toca
+    dois pinos também os liga: o fio do elastômero não depende da chave.
+    """
     cols = montagem.colocacoes
     net_de = {}
     for cel, k, i in zip(contatos.celula, contatos.peca, contatos.pino):
         p = cols[k].peca.pinos[i]
-        net = (k, p.grupo) if p.funcao != SINAL else (k, p.nome)
-        net_de.setdefault(int(cel), set()).add((net, p.funcao))
+        net_de.setdefault(int(cel), set()).add((_net(k, p), p.funcao))
     pontes = np.array(sorted(c for c, n in net_de.items()
                              if len({x[0] for x in n}) > 1), dtype=int)
     validas = {c: next(iter(n)) for c, n in net_de.items() if len({x[0] for x in n}) == 1}
 
+    funcao_net = {}
+    for n in net_de.values():
+        for net, f in n:
+            funcao_net[net] = f
+    pai = {net: net for net in funcao_net}
+
+    def raiz(a):
+        while pai[a] != a:
+            pai[a] = pai[pai[a]]
+            a = pai[a]
+        return a
+
+    def unir(a, b):
+        ra, rb = raiz(a), raiz(b)
+        if ra != rb:
+            pai[max(ra, rb, key=str)] = min(ra, rb, key=str)
+
+    for n in net_de.values():
+        nets = [x[0] for x in n]
+        for b in nets[1:]:
+            unir(nets[0], b)
+    for curto in curtos:
+        nets = [_net(k, cols[k].peca.pinos[i]) for k, i in curto]
+        nets = [x for x in nets if x in pai]
+        for b in nets[1:]:
+            unir(nets[0], b)
+
+    comp = {}
+    for net in funcao_net:
+        comp.setdefault(raiz(net), []).append(net)
+    raizes = sorted(comp, key=str)
     rng = np.random.default_rng(semente)
-    nets = sorted({v[0] for v in validas.values()}, key=str)
-    anon = dict(zip(nets, rng.permutation(len(nets))))
-    funcao_net = {v[0]: v[1] for v in validas.values()}
-    assinatura = {int(anon[n]): ASSINATURA[f] for n, f in funcao_net.items()}
-    terra_da_peca = {n[0]: int(anon[n]) for n, f in funcao_net.items() if f == TERRA}
-    referencia = {int(anon[n]): terra_da_peca.get(n[0], -1) for n in funcao_net}
+    anon = {r: int(a) for r, a in zip(raizes, rng.permutation(len(raizes)))}
+
+    def assinatura_de(nets):
+        fs = {funcao_net[n] for n in nets}
+        return ASSINATURA[TERRA if TERRA in fs else ENERGIA if ENERGIA in fs else SINAL]
+
+    assinatura = {anon[r]: assinatura_de(ns) for r, ns in comp.items()}
+    terra_da_peca = {}
+    for r, ns in comp.items():
+        for n in ns:
+            if funcao_net[n] == TERRA:
+                terra_da_peca.setdefault(n[0], anon[r])
+    referencia = {}
+    for r, ns in comp.items():
+        if assinatura[anon[r]] == "referencia":
+            referencia[anon[r]] = anon[r]
+        else:
+            pecas = sorted({n[0] for n in ns})
+            referencia[anon[r]] = next((terra_da_peca[k] for k in pecas if k in terra_da_peca), -1)
 
     cel = np.array(sorted(validas), dtype=int)
-    grupo = np.array([anon[validas[c][0]] for c in cel], dtype=int)
+    grupo = np.array([anon[raiz(validas[c][0])] for c in cel], dtype=int)
     return Sondagem(cel, grupo, assinatura, referencia, pontes)
+
+
+DESCONHECIDA = "desconhecida"
+ACERTO_MIN = 0.85           # abaixo disso o padrão não é de nenhuma peça do catálogo
+COBERTURA_MIN = 0.2         # menos de 20 % dos pinos tocados: não dá para afirmar o que é
+MIN_CELULAS = 30            # grupo menor que isso é resto, não peça
+RAZAO_CELULAS = (0.2, 4.0)  # células medidas / esperadas para o tipo ser testado
 
 
 @dataclass
@@ -67,6 +126,8 @@ class Identificacao:
     celulas: np.ndarray     # células desta peça
     classes: np.ndarray     # classe medida de cada célula
     pino: np.ndarray        # pino do catálogo atribuído a cada célula (-1 = nenhum)
+    pinos_sem_contato: list = field(default_factory=list)   # índices do catálogo
+    pontes: list = field(default_factory=list)  # [{"redes": [(i_ident, net)], "celulas": n}]
 
 
 def _pose_pinos(peca, x, y, rot):
@@ -135,18 +196,47 @@ def _icp(peca, pose, xy, cls, alcance, voltas=12):
 
 
 def identificar(base, sondagem):
-    """Agrupa as células por peça (pelo terra de referência) e reconhece cada grupo."""
+    """Agrupa as células por peça (pelo terra de referência) e reconhece cada grupo.
+
+    Um grupo pode ter mais de uma peça (terras em curto) ou nenhuma do catálogo:
+    reconhece a melhor, tira as células que caem sob ela e repete com o resto.
+    """
     xs, ys = base.centro(sondagem.celula % base.nx, sondagem.celula // base.nx)
     xy_all = np.column_stack([xs, ys])
-    ref = np.array([sondagem.referencia[g] for g in sondagem.grupo])
+    ref = np.array([sondagem.referencia[g] for g in sondagem.grupo], dtype=int)
     cls_all = np.array([CLASSE[sondagem.assinatura[g]] for g in sondagem.grupo])
 
     saida = []
-    for terra in sorted({r for r in ref if r >= 0}):
+    for terra in sorted({int(r) for r in ref if r >= 0}):
         m = ref == terra
-        xy, cls = xy_all[m], cls_all[m]
-        saida.append(_reconhecer(base, xy, cls, sondagem.celula[m]))
+        saida += _reconhecer_tudo(base, xy_all[m], cls_all[m], sondagem.celula[m])
+    sem_ref = ref < 0
+    if sem_ref.sum() >= MIN_CELULAS:
+        saida.append(_desconhecida(xy_all[sem_ref], cls_all[sem_ref], sondagem.celula[sem_ref]))
+    diagnosticar(base, sondagem, saida)
     return saida
+
+
+def _desconhecida(xy, cls, celulas):
+    return Identificacao(DESCONHECIDA, float(xy[:, 0].mean()), float(xy[:, 1].mean()), 0.0,
+                         0.0, 0.0, 0.0, celulas, cls, np.full(len(celulas), -1))
+
+
+def _reconhecer_tudo(base, xy, cls, celulas):
+    out = []
+    resto = np.ones(len(xy), bool)
+    while resto.sum() >= MIN_CELULAS:
+        idx = np.nonzero(resto)[0]
+        ident = _reconhecer(base, xy[idx], cls[idx], celulas[idx])
+        if ident is None:
+            out.append(_desconhecida(xy[idx], cls[idx], celulas[idx]))
+            break
+        out.append(ident)
+        peca = obter(ident.tipo)
+        alcance = peca.diametro_pad / 2 + base.raio_contato
+        d, _ = cKDTree(_pose_pinos(peca, ident.x, ident.y, ident.rot)).query(xy[idx])
+        resto[idx[d <= 1.5 * alcance]] = False
+    return out
 
 
 def _reconhecer(base, xy, cls, celulas):
@@ -155,15 +245,16 @@ def _reconhecer(base, xy, cls, celulas):
     for tipo in CATALOGO:
         peca = obter(tipo)
         esperado = len(peca.pinos) * area_contato(peca) / base.passo ** 2
-        if not 0.6 < len(xy) / esperado < 1.6:
+        if not RAZAO_CELULAS[0] < len(xy) / esperado < RAZAO_CELULAS[1]:
             continue
         alcance = peca.diametro_pad / 2 + base.raio_contato
         pins0 = np.array([(q.x, q.y) for q in peca.pinos])
         for rot0 in (0.0, 90.0, 180.0, 270.0):
             c, s = math.cos(math.radians(rot0)), math.sin(math.radians(rot0))
-            cx = c * pins0[:, 0].mean() - s * pins0[:, 1].mean()
-            cy = s * pins0[:, 0].mean() + c * pins0[:, 1].mean()
-            x0, y0 = xy[:, 0].mean() - cx, xy[:, 1].mean() - cy
+            rp = np.column_stack([c * pins0[:, 0] - s * pins0[:, 1], s * pins0[:, 0] + c * pins0[:, 1]])
+            # centro do retângulo envolvente: não se move quando falta um canto
+            x0 = (xy[:, 0].min() + xy[:, 0].max()) / 2 - (rp[:, 0].min() + rp[:, 0].max()) / 2
+            y0 = (xy[:, 1].min() + xy[:, 1].max()) / 2 - (rp[:, 1].min() + rp[:, 1].max()) / 2
             res = minimize(_custo_suave, [x0, y0, rot0], args=(peca, xy, cls, 0.25),
                            method="Nelder-Mead",
                            options={"xatol": 0.005, "fatol": 0.5, "initial_simplex":
@@ -172,12 +263,114 @@ def _reconhecer(base, xy, cls, celulas):
             pose = _icp(peca, res.x, xy, cls, alcance)
             acerto, cobertura, pino = _avaliar(peca, pose, xy, cls, alcance)
             hipoteses.append((acerto * cobertura, tipo, pose, acerto, cobertura, pino))
+    if not hipoteses:
+        return None
     hipoteses.sort(key=lambda h: -h[0])
     nota, tipo, pose, acerto, cobertura, pino = hipoteses[0]
+    if acerto < 0.97:
+        # contato parcial: o retângulo medido pode estar cortado (borda da base,
+        # canto levantado); alinha por cada borda e depois procura na grade
+        melhor = _alinhar_bordas(base, obter(tipo), pose, xy, cls, (nota, pose, acerto, cobertura, pino))
+        nota, pose, acerto, cobertura, pino = _busca_na_grade(base, obter(tipo), melhor[1], xy, cls, melhor)
+    # o acerto conta só as células que caem sob a peça: o resto pode ser de outra
+    dentro = _celulas_sob(obter(tipo), pose, xy, base)
+    acerto = float((pino[dentro] >= 0).mean()) if dentro.any() else 0.0
+    if acerto < ACERTO_MIN or cobertura < COBERTURA_MIN:
+        return None
     margem = nota - (hipoteses[1][0] if len(hipoteses) > 1 else 0.0)
     rot = float(pose[2]) % 360.0
     return Identificacao(tipo, float(pose[0]), float(pose[1]), rot, acerto, cobertura,
                          margem, celulas, cls, pino)
+
+
+def _alinhar_bordas(base, peca, pose, xy, cls, melhor):
+    alcance = peca.diametro_pad / 2 + base.raio_contato
+    rp = _pose_pinos(peca, 0.0, 0.0, pose[2])
+    opcoes = []
+    for eixo in (0, 1):
+        lo, hi = xy[:, eixo].min(), xy[:, eixo].max()
+        opcoes.append(((lo + hi) / 2 - (rp[:, eixo].min() + rp[:, eixo].max()) / 2,
+                       lo - rp[:, eixo].min(), hi - rp[:, eixo].max()))
+    for x0 in opcoes[0]:
+        for y0 in opcoes[1]:
+            p = _icp(peca, np.array([x0, y0, pose[2]]), xy, cls, alcance, voltas=8)
+            a, cob, pino = _avaliar(peca, p, xy, cls, alcance)
+            if a * cob > melhor[0]:
+                melhor = (a * cob, p, a, cob, pino)
+    return melhor
+
+
+def _busca_na_grade(base, peca, pose, xy, cls, melhor, passos=2):
+    alcance = peca.diametro_pad / 2 + base.raio_contato
+    local = np.array([(q.x, q.y) for q in peca.pinos])
+    d, _ = cKDTree(local).query(local, k=2)
+    passo = float(np.median(d[:, 1]))
+    c, s = math.cos(math.radians(pose[2])), math.sin(math.radians(pose[2]))
+    for i in range(-passos, passos + 1):
+        for j in range(-passos, passos + 1):
+            if i == 0 and j == 0:
+                continue
+            dx, dy = passo * (c * i - s * j), passo * (s * i + c * j)
+            p = _icp(peca, np.array([pose[0] + dx, pose[1] + dy, pose[2]]), xy, cls, alcance, voltas=6)
+            a, cob, pino = _avaliar(peca, p, xy, cls, alcance)
+            if a * cob > melhor[0]:
+                melhor = (a * cob, p, a, cob, pino)
+    return melhor
+
+
+def _celulas_sob(peca, pose, xy, base):
+    alcance = peca.diametro_pad / 2 + base.raio_contato
+    d, _ = cKDTree(_pose_pinos(peca, *pose)).query(xy)
+    return d <= 1.5 * alcance
+
+
+def _net_catalogo(p):
+    return p.grupo if p.funcao != SINAL else p.nome
+
+
+def diagnosticar(base, sondagem, identificacoes):
+    """Pinos sem contato e pontes, só com o que foi medido e a pose achada.
+
+    Uma ponte aparece como um grupo em curto que cai sob pinos de redes
+    diferentes (pela geometria da pose, não pela classe medida). Terra com terra
+    de outra peça não conta: os terras se juntam na base de qualquer jeito.
+    """
+    grupo_da_celula = dict(zip(sondagem.celula.tolist(), sondagem.grupo.tolist()))
+    redes_do_grupo = {}
+    for i, ident in enumerate(identificacoes):
+        if ident.tipo == DESCONHECIDA:
+            continue
+        peca = obter(ident.tipo)
+        ident.pontes = []
+        alcance = peca.diametro_pad / 2 + base.raio_contato
+        xs, ys = base.centro(ident.celulas % base.nx, ident.celulas // base.nx)
+        d, j = cKDTree(_pose_pinos(peca, ident.x, ident.y, ident.rot)).query(
+            np.column_stack([xs, ys]), distance_upper_bound=alcance)
+        # pino em curto continua em contato: sem contato é não ter célula sob ele
+        tocados = set(int(x) for x in j[np.isfinite(d)])
+        ident.pinos_sem_contato = sorted(set(range(len(peca.pinos))) - tocados)
+        for cel, dist, jj in zip(ident.celulas.tolist(), d, j):
+            if not np.isfinite(dist):
+                continue
+            p = peca.pinos[int(jj)]
+            g = grupo_da_celula[cel]
+            redes_do_grupo.setdefault(g, {}).setdefault((i, _net_catalogo(p), p.funcao), 0)
+            redes_do_grupo[g][(i, _net_catalogo(p), p.funcao)] += 1
+    grupos_da_rede = {}
+    for g, redes in redes_do_grupo.items():
+        for r in redes:
+            grupos_da_rede.setdefault(r, set()).add(g)
+    for g, redes in redes_do_grupo.items():
+        if len(redes) < 2 or all(f == TERRA for _, _, f in redes):
+            continue
+        # curto: as redes inteiras viraram uma só; senão, só algumas células de uma
+        # rede respondem pela outra (pino fora do lugar sobre a célula do vizinho)
+        tipo = "curto" if all(len(grupos_da_rede[r]) == 1 for r in redes) else "fora_do_lugar"
+        ponte = {"tipo": tipo, "redes": sorted((i, net) for i, net, _ in redes),
+                 "celulas": sum(redes.values())}
+        for i in sorted({i for i, _, _ in redes}):
+            identificacoes[i].pontes.append(ponte)
+    return identificacoes
 
 
 def conferir(montagem, identificacoes):
