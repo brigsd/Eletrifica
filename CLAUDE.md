@@ -112,7 +112,7 @@ python3 -m modulos.pcb.check_copper     # geometria do cobre x netlist   -> 43/4
 As duas também rodam pelo `pytest` (`tests/test_pcb.py`; a do esquemático é
 pulada se não houver `kicad-cli`). As duas foram conferidas (43/43 e netlists
 idênticas) depois da reestruturação. `python3 -m pytest` roda a suíte inteira
-(~100 s; `-m "not lento"` pula as mais demoradas). **Rode antes de afirmar** — o resultado de agora é o que conta.
+(~15 min; `-m "not lento"` pula as mais demoradas). A CI (`.github/workflows/testes.yml`) roda a suíte em 4 grupos paralelos a cada push. **Rode antes de afirmar** — o resultado de agora é o que conta.
 
 `check_copper` é independente do arquivo de netlist: rasteriza o cobre pelas
 aberturas do próprio Gerber e só usa coordenadas.

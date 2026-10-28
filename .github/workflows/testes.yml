@@ -1,0 +1,39 @@
+name: testes
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # grupos de tempo parecido; os que montam o sistema real (mapeamento, ~1 min) ficam separados
+        grupo:
+          - nome: integracao
+            arquivos: tests/test_integracao.py
+          - nome: banco-plataforma-boot
+            arquivos: tests/test_banco.py tests/test_plataforma.py tests/test_boot.py
+          - nome: construir-sensibilidade-defeitos
+            arquivos: tests/test_construir.py tests/test_sensibilidade.py tests/test_defeitos.py
+          - nome: dados-sistema-resto
+            arquivos: >-
+              tests/test_dados.py tests/test_sistema.py tests/test_verificador.py
+              tests/test_optica.py tests/test_energia.py tests/test_protocolos.py tests/test_pcb.py
+    name: ${{ matrix.grupo.nome }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Sistema
+        run: sudo apt-get update && sudo apt-get install -y libcairo2
+      - name: Dependências
+        run: python -m pip install -r requirements.txt
+      - name: Testes
+        # o teste do esquemático é pulado: não há kicad-cli aqui
+        run: python -m pytest -q ${{ matrix.grupo.arquivos }}
