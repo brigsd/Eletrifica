@@ -23,43 +23,43 @@ Conceito em [`conceito.md`](conceito.md). Visualizador 3D em [`../index.html`](.
 
 ## Temperatura da base
 
-A interconexão dissipa **149 W** dentro da própria base (chips tradutores e lasers). Só com o ar do gabinete a base chegaria a 267 °C. Com a placa fria sob a base (1000 W/m²K, líquido a 35 °C) e vias térmicas de cobre em 5% da área atravessando o LCP (troca efetiva 952 W/m²K), em carga máxima a base chega a **64 °C**. Sem as vias, o LCP de 1 mm segura o calor e a placa fria sozinha não basta.
+A interconexão dissipa **149 W** dentro da própria base (chips tradutores e lasers). Só com o ar do gabinete a base chegaria a 277 °C. Com a placa fria sob a base (1000 W/m²K, líquido a 35 °C) e vias térmicas de cobre em 5% da área atravessando o LCP (troca efetiva 952 W/m²K), em carga máxima a base chega a **68 °C**. Sem as vias, o LCP de 1 mm segura o calor e a placa fria sozinha não basta.
 
-- Aquecedor dos anéis: o local mais exigente pede 3,40 nm de sintonia; o aquecedor dá 4,00 nm. 0 chips sem faixa. A frio, os aquecedores gastam 29,2 W.
-- Consumo da interconexão: **166 W**, 11,2 pJ/bit sobre 14,8 Tb/s; uma ligação elétrica inteira custa ~6,3 pJ/bit. Partes: tradutores 88,1 W, controle das células 0,0 W, lasers 48,5 W, aquecedores (pior caso) 29,2 W.
+- Aquecedor dos anéis: o local mais exigente pede 3,60 nm de sintonia; o aquecedor dá 4,00 nm. 0 chips sem faixa. A frio, os aquecedores gastam 29,5 W.
+- Consumo da interconexão: **166 W**, 11,2 pJ/bit sobre 14,8 Tb/s; uma ligação elétrica inteira custa ~6,3 pJ/bit. Partes: tradutores 88,1 W, controle das células 0,0 W, lasers 48,5 W, aquecedores (pior caso) 29,5 W.
 
 Nos tradutores ópticos:
 
 | Peça | °C |
 |---|---|
-| CPU | 44,6 |
+| CPU | 45,6 |
 | DIMM | 36,8 |
 | FPGA | 37,6 |
-| GPU | 52,1 |
-| MEM0 | 48,0 |
-| MEM1 | 53,7 |
-| MEM2 | 52,9 |
-| MEM3 | 47,1 |
-| MEM4 | 51,6 |
-| MEM5 | 53,5 |
-| MEM6 | 51,4 |
-| MEM7 | 51,0 |
-| MEM8 | 45,8 |
-| MEM9 | 53,0 |
-| MEM10 | 49,6 |
-| MEM11 | 46,8 |
-| MEM12 | 48,5 |
-| MEM13 | 46,8 |
-| MEM14 | 48,9 |
-| MEM15 | 47,4 |
-| MEM16 | 46,9 |
-| MEM17 | 44,6 |
-| MEM18 | 47,3 |
-| MEM19 | 50,7 |
-| MEM20 | 50,3 |
-| MEM21 | 46,5 |
-| MEM22 | 48,2 |
-| MEM23 | 47,1 |
+| GPU | 55,3 |
+| MEM0 | 49,8 |
+| MEM1 | 50,6 |
+| MEM2 | 48,1 |
+| MEM3 | 48,9 |
+| MEM4 | 52,5 |
+| MEM5 | 51,9 |
+| MEM6 | 44,3 |
+| MEM7 | 47,2 |
+| MEM8 | 46,4 |
+| MEM9 | 50,0 |
+| MEM10 | 51,5 |
+| MEM11 | 47,9 |
+| MEM12 | 50,7 |
+| MEM13 | 47,1 |
+| MEM14 | 49,1 |
+| MEM15 | 50,0 |
+| MEM16 | 47,1 |
+| MEM17 | 43,6 |
+| MEM18 | 47,0 |
+| MEM19 | 52,3 |
+| MEM20 | 52,4 |
+| MEM21 | 48,3 |
+| MEM22 | 50,6 |
+| MEM23 | 50,1 |
 | PCH | 36,8 |
 | PONTE | 39,3 |
 
@@ -109,8 +109,8 @@ Erros por regra, do conceito até o projeto atual:
 |---|---|---|---|---|---|---|
 | banda | 9058 | 7702 | 0 | 0 | 0 | 0 |
 | energia | 1 | 1 | 1 | 0 | 0 | 0 |
-| temperatura | 149 | 165 | 167 | 166 | 61 | 0 |
-| **total** | **9208** | **7868** | **168** | **166** | **61** | **0** |
+| temperatura | 149 | 163 | 166 | 164 | 62 | 0 |
+| **total** | **9208** | **7866** | **167** | **164** | **62** | **0** |
 
 O que cada decisão resolveu:
 
@@ -170,7 +170,7 @@ Nem a i5-13600KF nem a GPU têm CXL. Com o banco unificado da base (seção segu
 A GPU só tem uma porta rápida, a de memória; o PCIe até a CPU é o barramento lento do offloading. Então o banco compartilhado entra pela porta de memória da GPU. A base está no meio de cada pino e faz o que uma placa-mãe não faz (`modulos/dados/memoria_unificada.py`):
 
 - **Mais chips por canal.** 24 chips GDDR7 de 16 Gb; a GPU enxerga 12 chips de 32 Gb (o maior do padrão), cada um feito de 2 vizinhos. O seletor do grupo escolhe o chip pelo comando, como num LRDIMM: 480 seletores, 12 detectores, e uma linha de atraso em cada porta deixa os chips do grupo chegando juntos.
-- **A CPU nos mesmos chips.** Um canal DDR5 da CPU vai para a ponte, que se apresenta como um DIMM de 48 GB e declara CL53 no SPD (o DDR5 aceita até CL66; a leitura pela ponte leva 21,9 ns, com 1,61 ns de caminho até os chips e 1,30 ns de volta).
+- **A CPU nos mesmos chips.** Um canal DDR5 da CPU vai para a ponte, que se apresenta como um DIMM de 48 GB e declara CL53 no SPD (o DDR5 aceita até CL66; a leitura pela ponte leva 22,0 ns, com 1,64 ns de caminho até os chips e 1,33 ns de volta).
 - **Um dono por rank.** 480 muxes de posse, comandados pelo FPGA; enquanto um rank é da CPU, a base absorve ~6,3 milhões de refresh por segundo que a GPU manda para ele.
 - **Mesmo endereço dos dois lados.** No boot a ponte aprende os dois mapas com 29 sondas da GPU e 28 da CPU e confere com 64 sondas aleatórias de cada lado: **0 erros**; varrer o banco leva 33,6 ms. Um mapa fora da família (rank misturado com bit baixo) é avisado.
 
