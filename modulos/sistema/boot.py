@@ -14,6 +14,10 @@ entre os blocos A e B), "req:PECA:CAPACIDADE" (requisito fica sem provedor),
 """
 from dataclasses import dataclass, field
 
+from modulos.dados import comandos as CMD
+from modulos.dados import ddr5 as DDR5
+from modulos.dados import pcie as PC
+
 # tempos típicos (µs); `sim` sobrescreve os que foram medidos
 PADRAO = {
     "tempo_sonda_por_celula_us": 2.0,
@@ -135,6 +139,33 @@ def _ms(t_us):
     if t_us < 1_000:
         return f"{t_us:.0f} µs"
     return f"{t_us / 1000:.1f} ms".replace(".", ",")
+
+
+def _ltssm(nl, blocos, sinais, pecas, t_trava):
+    """Estado do tradutor que cada transmissor PCIe enxerga, e o LTSSM em cima dele."""
+    vias = PC.vias_pcie(nl, "PCIe5")
+    por_peca = {}
+    for s, v in vias:
+        chip = blocos.get(v.pai)
+        if chip is None:
+            continue
+        por_peca.setdefault(chip.atributos.get("peca"), []).append(v)
+    squelch = max((v.atributos.get("squelch_ps", float("inf")) for _, v in vias if v.tipo == "via_rx"),
+                  default=0.0)
+    pontas = sorted(p for p in por_peca if any(v.tipo == "via_tx" for v in por_peca[p]))
+    lados, culpado = [], None
+    for peca in pontas[:2]:
+        tx = [v for v in por_peca.get(peca, []) if v.tipo == "via_tx"]
+        politicas = {v.atributos.get("deteccao_receptor") for v in tx}
+        politica = politicas.pop() if len(politicas) == 1 else None
+        if politica != "controlada" and culpado is None and tx:
+            culpado = tx[0].id
+        outra = [p for p in pontas if p != peca]
+        lados.append(PC.LadoTradutor(politica, all(o in pecas for o in outra),
+                                     all(v.pai in t_trava for v in tx), squelch))
+    olho = PC.avaliar_netlist(nl, "PCIe5", comparar_linear=False)["olho"]
+    r = PC.ltssm(lados[0], lados[1] if len(lados) > 1 else lados[0], olho)
+    return {"ltssm": r, "olho": olho, "bloco": culpado or (pontas[0] if pontas else "PCIe")}
 
 
 def emular(netlist, sim=None, falhas=()):
@@ -517,11 +548,19 @@ def _executar(nl, cfg, top, ex):
     conferir_sinais("Treino da memória", ddr)
     if not ddr:
         raise _Parou("Treino da memória", "não há nenhum sinal DDR5 na netlist", (cpus or [None])[0])
+    esp = DDR5.avaliar_netlist(nl)
+    if esp["problemas"]:
+        bloco, motivo = esp["problemas"][0]
+        raise _Parou("Treino da memória", motivo, bloco)
+    n_mrw = sum(1 for c in CMD.decodificar("DDR5-4800", DDR5.sequencia_padrao()) if c.registrador)
+    ex.evento(t_plt, fpga, "MRW espelhados",
+              f"{n_mrw} MRW de terminação e força acompanhados por {esp['chaves']} chaves do lado do controlador")
     t_mem = t_plt + cfg["treino_memoria_us"]
     for d in dimms:
         ex.evento(t_mem, d, "treinado")
     etapa("Treino da memória", t_mem, "funcoes",
-          f"A CPU varre o atraso do DQS em cada pista de {len(dimms)} módulos e grava o centro da janela.",
+          f"A CPU programa terminação e força por MRW (os tradutores do lado dela espelham), varre o "
+          f"atraso do DQS em cada pista de {len(dimms)} módulos e grava o centro da janela.",
           energizadas=todas, enlaces=["AUX", "DDR5"])
 
     # ---- 15. PCIe e GDDR7 ------------------------------------------------------------
@@ -529,18 +568,24 @@ def _executar(nl, cfg, top, ex):
     t_fim = t_mem
     pcie = [s for s in nl.sinais.values() if s.protocolo == "PCIe5"]
     if pcie:
-        gpus = sorted({p for s in pcie for p in pecas_do_sinal(s)} - set(cpus))
+        gpus = sorted(({p for s in pcie for p in pecas_do_sinal(s)} & set(pecas)) - set(cpus))
         exigir("PCIe", "raiz-PCIe", gpus, obrigatorio=False)
         exigir("PCIe", "12V-cabo", gpus, obrigatorio=False)
         conferir_sinais("PCIe", pcie)
-        t_fim = max(t_fim, t_mem + cfg["treino_pcie_us"])
+        res = _ltssm(nl, blocos, pcie, set(pecas), t_trava)
+        if not res["ltssm"].ok:
+            raise _Parou("PCIe", f"LTSSM parou em {res['ltssm'].parou_em}: {res['ltssm'].motivo}",
+                         res["bloco"])
+        t_pcie = res["ltssm"].total_ms * 1e3
+        t_fim = max(t_fim, t_mem + t_pcie)
         for g in gpus:
-            ex.evento(t_mem + cfg["treino_pcie_us"], g, "enlace PCIe ativo", "Gen5 x16")
+            ex.evento(t_mem + t_pcie, g, "enlace PCIe ativo",
+                      f"Gen5 x16, preset {res['olho']['preset']}, CTLE {res['olho']['ctle_db']} dB")
         enlaces.add("PCIe")
     g7 = [s for s in nl.sinais.values() if s.protocolo == "GDDR7-32"]
     if g7:
         conferir_sinais("GDDR7", g7)
-        t_g7 = t_mem + cfg["treino_pcie_us"] + cfg["treino_gddr7_us"]
+        t_g7 = t_mem + (t_pcie if pcie else 0.0) + cfg["treino_gddr7_us"]
         t_fim = max(t_fim, t_g7)
         ex.evento(t_g7, "GDDR7", "treinada")
         enlaces.add("GDDR7")

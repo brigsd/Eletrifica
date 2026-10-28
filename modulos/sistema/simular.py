@@ -15,7 +15,10 @@ import numpy as np
 from modulos.conexoes.construir import construir
 from modulos.conexoes import contexto as CX
 from modulos.conexoes.verificador import REGRAS, aquecedores, consumo, verificar
+from modulos.dados import comandos as CMD
+from modulos.dados import ddr5 as DDR
 from modulos.dados import emulador as DE
+from modulos.dados import pcie as PCIE
 from modulos.dados import latencia as DL
 from modulos.dados import roteamento as DR
 from modulos.energia import arvore, contatos, protecao, vrm
@@ -250,6 +253,13 @@ def executar():
     ex = emular(nl, sim={"sondagem_us": R["mapeamento"]["tempo_sondagem_ms"] * 1e3,
                          "vrm_assentamento_us": deg["assentamento_us"],
                          "aneis_travamento_us": trav["travou_em_us"] or 200.0})
+    R["protocolos"] = {
+        "decodificacao": {p: {"decodifica": CMD.necessarios(p), "copia": CMD.copiados_sem_ler(p),
+                              "latencia_ps": CMD.latencia_decodificacao_ps(p), "janela_ps": CMD.janela_ps(p)}
+                          for p in ("DDR5-4800", "GDDR7-32")},
+        "ddr5_espelhando": DDR.resumo(DDR.simular(espelhar=True)),
+        "ddr5_sem_espelho": DDR.resumo(DDR.simular(espelhar=False)),
+        "pcie": PCIE.avaliar_netlist(nl)}
     R["boot"] = {"ok": ex.ok, "parou_em": ex.parou_em, "tempos_ms": {k: v / 1e3 for k, v in ex.tempos.items()}}
 
     # cena 3D ---------------------------------------------------------------------
@@ -388,7 +398,9 @@ NOME_REGRA = {"R01-caminho": "caminho", "R02-sentido": "sentido", "R03-padrao": 
               "R04-banda": "banda", "R05-optico": "luz", "R06-energia": "energia",
               "R07-controle": "controle", "R08-capacidade": "capacidade", "R09-tempo": "tempo",
               "R10-relogio": "relógio", "R11-requisito": "requisito", "R12-orfao": "órfão",
-              "R13-temperatura": "temperatura", "R14-consumo": "consumo"}
+              "R13-temperatura": "temperatura", "R14-consumo": "consumo",
+              "R15-decodificacao": "decodificação", "R16-ajuste": "ajuste elétrico",
+              "R17-pcie": "PCIe"}
 
 
 def _secao_conexoes(R):
@@ -433,6 +445,29 @@ def _secao_conexoes(R):
         L += [f"| {k} | {v:.2f} ms |" for k, v in bt["tempos_ms"].items()]
     else:
         L += [f"### Boot emulado: para em **{bt['parou_em']['etapa']}** — {bt['parou_em']['motivo']}"]
+    pr = R["protocolos"]
+    d5, g7 = pr["decodificacao"]["DDR5-4800"], pr["decodificacao"]["GDDR7-32"]
+    com, sem = pr["ddr5_espelhando"], pr["ddr5_sem_espelho"]
+    pc = pr["pcie"]
+    pior = max(sem["por_situacao"].values(), key=lambda x: abs(x["erro_amplitude_mv"]), default=None)
+    L += ["", "### O que o tradutor faz além de copiar", "",
+          "- **Decodificação parcial.** Os dados são copiados sem decodificar. O comando, não: "
+          "para saber o sentido dos pinos bidirecionais e acompanhar os ajustes elétricos, o "
+          f"tradutor decodifica {', '.join(d5['decodifica'])} na DDR5 e {', '.join(g7['decodifica'])} "
+          f"na GDDR7, e copia sem ler o resto ({', '.join(d5['copia'])}). Leva "
+          f"{d5['latencia_ps'] / 1000:.1f} ns na DDR5 contra {d5['janela_ps'] / 1000:.0f} ns até o "
+          f"primeiro dado, e {g7['latencia_ps'] / 1000:.1f} ns na GDDR7 contra {g7['janela_ps'] / 1000:.0f} ns.",
+          f"- **Ajustes dinâmicos da DDR5.** A CPU muda terminação e força de saída por MRW durante o "
+          f"uso. O tradutor de cada ponta espelha esses valores: com espelho, {com['divergem']} de "
+          f"{com['comandos']} comandos divergem; sem espelho, {sem['divergem']} de {sem['comandos']}"
+          + (f" (pior caso: programado {pior['programado']}, visto {pior['visto']}, "
+             f"{pior['erro_amplitude_mv']:.0f} mV de amplitude)." if pior else "."),
+          f"- **PCIe 5.** A detecção de receptor é controlada pelo FPGA (o tradutor só apresenta "
+          f"terminação com a GPU identificada e a luz travada) e o ocioso elétrico atravessa a luz. "
+          f"A equalização escolhe o preset {pc['olho']['preset']} com CTLE de {pc['olho']['ctle_db']} dB: "
+          f"olho com {pc['olho']['altura_rel']:.2f} de altura e {pc['olho']['largura_ui']:.2f} UI de "
+          f"largura; com um tradutor idealmente linear seria {pc['olho_linear']['altura_rel']:.2f} e "
+          f"{pc['olho_linear']['largura_ui']:.2f} UI — a não linearidade do anel quase não pesa em NRZ.", ""]
     return L + [""]
 
 

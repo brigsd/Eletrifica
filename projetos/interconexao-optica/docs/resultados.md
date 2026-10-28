@@ -114,7 +114,7 @@ O que cada decisão resolveu:
 
 Folga de cada número escolhido: [`sensibilidade.md`](sensibilidade.md). Contato imperfeito (peça inclinada, sujeira, pino torto): [`defeitos.md`](defeitos.md).
 
-### Boot emulado na netlist: pronto em 551 ms
+### Boot emulado na netlist: pronto em 486 ms
 
 Máquina de estados com guarda em cada transição (`modulos/sistema/boot.py`):
 
@@ -130,8 +130,15 @@ Máquina de estados com guarda em cada transição (`modulos/sistema/boot.py`):
 | Núcleo da CPU | 199,80 ms |
 | Relógio e reset | 200,80 ms |
 | Treino da memória | 400,80 ms |
-| PCIe e GDDR7 | 550,80 ms |
-| Pronto | 550,80 ms |
+| PCIe e GDDR7 | 486,13 ms |
+| Pronto | 486,13 ms |
+
+### O que o tradutor faz além de copiar
+
+- **Decodificação parcial.** Os dados são copiados sem decodificar. O comando, não: para saber o sentido dos pinos bidirecionais e acompanhar os ajustes elétricos, o tradutor decodifica MRR, RD, WR, MRW:5,32,33,34,35 na DDR5 e RD, RDTR, WR, WRTR, MRS:3,7,8 na GDDR7, e copia sem ler o resto (ACT, NOP, PREab, PREpb, REFab, VREFCA). Leva 1,3 ns na DDR5 contra 15 ns até o primeiro dado, e 1,2 ns na GDDR7 contra 9 ns.
+- **Ajustes dinâmicos da DDR5.** A CPU muda terminação e força de saída por MRW durante o uso. O tradutor de cada ponta espelha esses valores: com espelho, 0 de 10 comandos divergem; sem espelho, 8 de 10 (pior caso: programado 240 Ω, visto 40 Ω, -369 mV de amplitude).
+- **PCIe 5.** A detecção de receptor é controlada pelo FPGA (o tradutor só apresenta terminação com a GPU identificada e a luz travada) e o ocioso elétrico atravessa a luz. A equalização escolhe o preset P5 com CTLE de 4 dB: olho com 0,89 de altura e 0,81 UI de largura; com um tradutor idealmente linear seria 0,89 e 0,81 UI — a não linearidade do anel quase não pesa em NRZ.
+
 
 ## Etapa 5 — dados
 

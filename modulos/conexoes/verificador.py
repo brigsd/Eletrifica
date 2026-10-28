@@ -17,7 +17,8 @@ from modulos.dados.protocolos import PROTOCOLOS
 
 REGRAS = ("R01-caminho", "R02-sentido", "R03-padrao", "R04-banda", "R05-optico",
           "R06-energia", "R07-controle", "R08-capacidade", "R09-tempo", "R10-relogio",
-          "R11-requisito", "R12-orfao", "R13-temperatura", "R14-consumo")
+          "R11-requisito", "R12-orfao", "R13-temperatura", "R14-consumo",
+          "R15-decodificacao", "R16-ajuste", "R17-pcie")
 
 # perda máxima das trilhas elétricas em cada lado do enlace, na frequência de Nyquist
 ORCAMENTO_TRILHA_DB = {"PCIe5-CML": 8.0, "PCIe4-CML": 8.0, "GDDR7-DQ": 4.0, "GDDR7-EDC": 4.0,
@@ -960,6 +961,129 @@ def _r14(net, rel, contexto):
         rel.violacoes.append(Violacao(R, "aviso", "interconexao", texto))
 
 
+# ------------------------------------------------------------- protocolos
+def _chaves_do_detector(net, det):
+    out = []
+    for lig in net.ligacoes_de((det.id, "sentido")):
+        outro = lig.b if lig.a == (det.id, "sentido") else lig.a
+        b = net.blocos.get(outro[0])
+        if b is not None and b.tipo == "chave_sentido":
+            out.append(b)
+    return out
+
+
+def _detector_da_chave(net, ch):
+    for lig in net.ligacoes_de((ch.id, "sentido")):
+        outro = lig.b if lig.a == (ch.id, "sentido") else lig.a
+        b = net.blocos.get(outro[0])
+        if b is not None and b.tipo == "detector_sentido":
+            return b
+    return None
+
+
+def _le_registrador(det):
+    return det is not None and any(x.startswith(("MRW", "MRS")) for x in det.atributos.get("decodifica", ()))
+
+
+def _r15(net, rel):
+    """O detector decodifica o que muda sentido e nível, a tempo do primeiro dado."""
+    R = "R15-decodificacao"
+    from modulos.dados import comandos as K
+    for det in net.por_tipo("detector_sentido"):
+        a = det.atributos
+        chaves = _chaves_do_detector(net, det)
+        protos = sorted({c.atributos.get("protocolo") for c in chaves} - {None}) or a.get("protocolos", [])
+        dec = set(a.get("decodifica", ()))
+        for p in protos:
+            if p not in K.TABELA:
+                continue
+            falta = [x for x in K.necessarios(p) if x not in dec]
+            if falta:
+                rel.violacoes.append(Violacao(R, "erro", det.id,
+                                              f"{det.id}: não decodifica {falta} de {p}; sem isso o "
+                                              "sentido ou a terminação não acompanham o comando"))
+            lat = a.get("latencia_decodificacao_ps")
+            comut = max((c.atributos.get("comutacao_ps", 0.0) for c in chaves), default=0.0)
+            if lat is None:
+                rel.violacoes.append(Violacao(R, "erro", det.id, f"{det.id}: latência de decodificação não declarada"))
+            elif lat + comut > K.janela_ps(p):
+                rel.violacoes.append(Violacao(R, "erro", det.id,
+                                              f"{det.id}: decodificar ({lat:.0f} ps) + comutar ({comut:.0f} ps) "
+                                              f"passa da janela de {K.janela_ps(p):.0f} ps antes do primeiro dado"))
+        if a.get("dados_decodificados"):
+            rel.violacoes.append(Violacao(R, "aviso", det.id,
+                                          f"{det.id} decodifica os dados; o conceito pede cópia sem decodificar"))
+
+
+def _r16(net, rel):
+    """Terminação e força que a peça programa: o tradutor cobre a faixa e acompanha o MRW."""
+    R = "R16-ajuste"
+    from modulos.dados import ddr5 as D
+    for ch in net.por_tipo("chave_sentido"):
+        a = ch.atributos
+        prot = a.get("protocolo")
+        if prot not in D.PERMITIDOS:
+            continue
+        perm = D.PERMITIDOS[prot]
+        term, forca = a.get("terminacao_ajustavel"), a.get("forca_ajustavel")
+        ft = [v for v in perm["terminacao"] if term is None or v not in term]
+        ff = [v for v in perm["forca"] if forca is None or v not in forca]
+        if ft or ff:
+            rel.violacoes.append(Violacao(R, "erro", ch.id,
+                                          f"{ch.id}: faixa não cobre o que {prot} programa "
+                                          f"(terminação {ft or 'ok'}, força {ff or 'ok'})"))
+        if a.get("papel_eletrico") == "parece_memoria":
+            falta = [c for c in D.espelho(prot) if c not in a.get("espelha", ())]
+            if falta:
+                rel.violacoes.append(Violacao(R, "erro", ch.id, f"{ch.id}: não espelha {falta}"))
+            if not _le_registrador(_detector_da_chave(net, ch)):
+                rel.violacoes.append(Violacao(R, "erro", ch.id,
+                                              f"{ch.id}: o detector não lê MRW; a terminação vista pela "
+                                              "peça não segue o que ela programou"))
+    for s in net.sinais.values():
+        if s.protocolo not in D.PERMITIDOS or s.papel not in ("CA", "CS", "CK") or len(s.sentidos) != 1:
+            continue
+        via = next((net.blocos[b] for b, _ in s.caminhos.get("ida", ())
+                    if b in net.blocos and net.blocos[b].tipo == "via_tx"), None)
+        if via is None:
+            continue
+        det = net.blocos.get(via.atributos.get("ajuste_por"))
+        if det is None or not _le_registrador(det):
+            rel.violacoes.append(Violacao(R, "erro", via.id,
+                                          f"{via.id}: o ODT de {s.papel} que a peça programa não é espelhado ({s.id})"))
+        elif not set(D.PERMITIDOS[s.protocolo]["terminacao"]) <= set(via.atributos.get("terminacao_ajustavel", ())):
+            rel.violacoes.append(Violacao(R, "erro", via.id, f"{via.id}: faixa de terminação de {s.papel} curta"))
+
+
+def _r17(net, rel, contexto):
+    """PCIe: detecção de receptor controlada, ocioso elétrico a tempo, olho aberto."""
+    R = "R17-pcie"
+    from modulos.dados import pcie as P
+    vistos = set()
+    for s, v in P.vias_pcie(net):
+        if v.id in vistos:
+            continue
+        vistos.add(v.id)
+        a = v.atributos
+        if v.tipo == "via_tx" and a.get("deteccao_receptor") != "controlada":
+            rel.violacoes.append(Violacao(R, "erro", v.id,
+                                          f"{v.id}: detecção de receptor '{a.get('deteccao_receptor')}'; a terminação "
+                                          "só pode aparecer quando o par existe e a luz travou"))
+        if v.tipo == "via_rx":
+            sq = a.get("squelch_ps")
+            if sq is None or sq > P.LIMITE_SQUELCH_PS:
+                rel.violacoes.append(Violacao(R, "erro", v.id,
+                                              f"{v.id}: ocioso elétrico atravessa em {sq} ps; limite "
+                                              f"{P.LIMITE_SQUELCH_PS:.0f} ps"))
+    for prot in ("PCIe5", "PCIe4"):
+        res = (contexto or {}).get("pcie", {}).get(prot) or P.avaliar_netlist(net, prot, comparar_linear=False)
+        if res and not res["olho"]["aberto"]:
+            o = res["olho"]
+            rel.violacoes.append(Violacao(R, "erro", prot,
+                                          f"{prot}: nenhum preset abre o olho (altura {o['altura_rel']:.2f}, "
+                                          f"largura {o['largura_ui']:.2f} UI)"))
+
+
 def verificar(netlist, contexto=None):
     """Roda as regras e devolve um Relatorio."""
     rel = Relatorio()
@@ -979,4 +1103,7 @@ def verificar(netlist, contexto=None):
     _r12(netlist, rel)
     _r13(netlist, rel, contexto)
     _r14(netlist, rel, contexto)
+    _r15(netlist, rel)
+    _r16(netlist, rel)
+    _r17(netlist, rel, contexto)
     return rel

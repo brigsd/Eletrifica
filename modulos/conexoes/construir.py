@@ -17,6 +17,8 @@ from scipy.optimize import linear_sum_assignment
 from modulos.conexoes.netlist import Netlist, Requisito, Sinal
 from modulos.conexoes.padroes import PADROES, padrao_do_pino
 from modulos.conexoes.posicao import Ocupacao, manhattan
+from modulos.dados import comandos as CMD
+from modulos.dados import ddr5 as DDR5
 from modulos.optica import enlace as E
 from modulos.sistema.celula import Chave, chave as chave_da_celula
 
@@ -55,12 +57,20 @@ CELULAS_POR_MATRIZ = 4096     # endereçamento linha x coluna de um controlador 
 MARGEM_REGULADOR = 1.25
 PULLUP_OHM = 1000.0
 
+# o que o tradutor faz além de copiar o sinal
+CHAVE_COMUTACAO_PS = 300.0     # troca de sentido de um pino bidirecional
+SQUELCH_PS = 4000.0            # ocioso elétrico do PCIe atravessando a luz
+TERMINACAO_TRADUTOR_OHM = (34.0, 40.0, 48.0, 60.0, 80.0, 120.0, 240.0, None)   # None = aberto
+FORCA_TRADUTOR_OHM = (34.0, 40.0, 48.0)
+CONTROLADORES_DE_MEMORIA = ("i5-13600KF", "GPU")
+
 # constantes que construir(..., parametros={...}) pode sobrepor numa chamada
 PARAMETROS = ("VIAS_MAX", "CHIP_MM", "AFASTAMENTO_CHIP_MM", "VDD_CHIP_V", "PJ_BIT_TX", "PJ_BIT_RX",
               "AQUECEDOR_MW", "CONTROLE_CHIP_W", "VERTICAL_FOTONICA_MM", "Z_TRILHA_OHM",
               "PERDA_DB_MM_GHZ", "CAMADAS_SINAL", "PASSO_TRILHA_MM", "LASER_EFICIENCIA", "LASER_TEC_W",
               "DIVISOR_SAIDAS_MAX", "PERDA_FIBRA_DB_MM", "PERDA_CONECTOR_DB",
-              "DISPOSITIVOS_POR_I3C", "CELULAS_POR_MATRIZ", "MARGEM_REGULADOR", "PULLUP_OHM")
+              "DISPOSITIVOS_POR_I3C", "CELULAS_POR_MATRIZ", "MARGEM_REGULADOR", "PULLUP_OHM",
+              "CHAVE_COMUTACAO_PS", "SQUELCH_PS", "TERMINACAO_TRADUTOR_OHM", "FORCA_TRADUTOR_OHM")
 
 DIREITO = {"ida": "sai", "volta": "entra", "duplo": "bidir"}
 INVERSO = {"ida": "entra", "volta": "sai", "duplo": "bidir"}
@@ -636,7 +646,14 @@ class _Construtor:
                 if c.sentido == "duplo":
                     ch = f"{chip}:s{self._n[(chip, 's')]}"
                     self._n[(chip, "s")] += 1
-                    nl.bloco(ch, "chave_sentido", nl.blocos[chip].posicao, pai=chip, pino=f"{peca}:{pino}")
+                    controlador = self.pecas[peca].tipo in CONTROLADORES_DE_MEMORIA
+                    nl.bloco(ch, "chave_sentido", nl.blocos[chip].posicao, pai=chip, pino=f"{peca}:{pino}",
+                             protocolo=prot, comutacao_ps=CHAVE_COMUTACAO_PS,
+                             papel_eletrico="parece_memoria" if controlador else "parece_controlador",
+                             terminacao_ajustavel=list(TERMINACAO_TRADUTOR_OHM),
+                             forca_ajustavel=list(FORCA_TRADUTOR_OHM),
+                             espelha=DDR5.espelho(prot) if controlador else [],
+                             ajuste="espelha os MRW" if controlador else "fixo no treino")
                     nl.porta(ch, "pino", "eletrico", "bidir", padrao=pad)
                     nl.porta(ch, "tx", "eletrico", "sai", padrao=pad)
                     nl.porta(ch, "rx", "eletrico", "entra", padrao=pad)
@@ -649,6 +666,12 @@ class _Construtor:
                     nl.ligar((tid, "b"), (vtx, "e"), "trilha")
                 else:
                     nl.ligar((vrx, "e"), (tid, "b"), "trilha")
+                if prot.startswith("PCIe"):
+                    if vtx:
+                        nl.blocos[vtx].atributos.update(deteccao_receptor="controlada",
+                                                        transferencia="anel, não linear")
+                    if vrx:
+                        nl.blocos[vrx].atributos.update(squelch_ps=SQUELCH_PS)
                 pontas[lado] = dict(peca=peca, pino=pino, tid=tid, vtx=vtx, vrx=vrx, ch=ch, chip=chip)
                 trilhas_do_grupo[(c.enlace, c.grupo, peca)].add(tid)
                 if c.papel in ("CA", "CS", "CK"):
@@ -727,6 +750,29 @@ class _Construtor:
             nl.blocos[det].atributos["entradas_ca"] = k
             for ch, _, _ in chaves:
                 nl.ligar((det, "sentido"), (ch, "sentido"), "interno")
+            protocolos = sorted({nl.blocos[ch].atributos["protocolo"] for ch, _, _ in chaves})
+            a = nl.blocos[det].atributos
+            a["protocolos"] = protocolos
+            a["decodifica"] = sorted({x for p in protocolos for x in CMD.necessarios(p)})
+            a["copia_sem_ler"] = sorted({x for p in protocolos for x in CMD.copiados_sem_ler(p)})
+            a["latencia_decodificacao_ps"] = max(CMD.latencia_decodificacao_ps(p) for p in protocolos)
+            a["dados_decodificados"] = False      # DQ, DQS e WCK passam pela luz sem ser lidos
+            # o CA que chega do controlador entra numa via_tx: a terminação dela espelha o ODT de CA
+            for n_, porta in nl.blocos[det].portas.items():
+                if not n_.startswith("ca"):
+                    continue
+                for lig in nl.ligacoes_de((det, n_)):
+                    fonte = lig.a if lig.b == (det, n_) else lig.b
+                    blk = nl.blocos[fonte[0]]
+                    if blk.tipo != "trilha":
+                        continue
+                    for l2 in nl.ligacoes_de(fonte):
+                        outro = l2.b if l2.a == fonte else l2.a
+                        via = nl.blocos.get(outro[0])
+                        if via is not None and via.tipo == "via_tx" and \
+                                self.pecas[nl.blocos[chip].atributos["peca"]].tipo in CONTROLADORES_DE_MEMORIA:
+                            via.atributos.update(terminacao_ajustavel=list(TERMINACAO_TRADUTOR_OHM),
+                                                 ajuste_por=det, protocolo=protocolos[0])
 
     # ------------------------------------------------------------ sinais lentos
     def sinais_lentos(self):

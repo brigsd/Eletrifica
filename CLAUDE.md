@@ -55,7 +55,7 @@ modulos/      ferramentas por objetivo; cada pasta é um módulo Python
   pcb/          engenharia reversa de PCB a partir do Gerber
   componentes/  modelos das peças do projeto óptico
   sistema/      base de células, chave da célula, sondagem, identificação, boot, simulação
-  conexoes/     netlist do sistema inteiro + verificador (14 regras) + sensibilidade
+  conexoes/     netlist do sistema inteiro + verificador (17 regras) + sensibilidade
   energia/ termico/ optica/ dados/   simuladores
   visual/       cena 3D e gráficos SVG
 projetos/     um diretório por projeto (dados de origem + saídas geradas + visualizador)
@@ -170,7 +170,7 @@ Regras do modelo:
 - **Nada é conectado por mágica.** `modulos/conexoes/construir.py` monta a
   netlist com cada salto de cada sinal (célula, trilha, chip tradutor, laser,
   fibra, receptor, driver), mais energia, controle e relógio de cada bloco.
-  `verificador.py` confere 14 regras (R13 temperatura e R14 consumo usam o
+  `verificador.py` confere 17 regras (R13 temperatura e R14 consumo usam o
   contexto de `contexto.py`, montado da simulação térmica e de energia);
   `modulos/sistema/boot.py` liga o sistema
   como máquina de estados sobre essa netlist. Um módulo novo que crie
@@ -180,6 +180,10 @@ Regras do modelo:
   O relé MEMS por célula (`rele_mems`) é **premissa aceita pelo dono**
   (2026-10-28): não troque sem perguntar.
 - Os testes da netlist real usam o fixture `netlist_real` de `tests/conftest.py`.
+- O tradutor copia os **dados** sem decodificar, mas decodifica o **comando**
+  (`modulos/dados/comandos.py`): sentido dos bidirecionais e MRW de terminação e
+  força, que ele espelha (`ddr5.py`). O PCIe tem detecção de receptor controlada
+  pelo FPGA e LTSSM/equalização em `pcie.py`. Regras R15–R17.
 - **Contato imperfeito** (`modulos/sistema/defeitos.py`) altera a verdade antes
   da sondagem; peça recusada ou desconhecida não liga célula nenhuma.
 - Dois relatórios à parte, mais lentos, regenerados à mão:
@@ -191,7 +195,7 @@ Resultados atuais (confira rodando, não confie nestes números):
 - 17/17 peças identificadas, erro de µm.
 - Conceito como estava: ~2.800 erros no verificador. Com as decisões de
   `montagem.json` (tradutor sob a peça, relé MEMS na célula, plano de 2 oz,
-  placa fria sob a base): 0 erros, e o boot emulado fica pronto em ~550 ms.
+  placa fria sob a base): 0 erros, e o boot emulado fica pronto em ~490 ms.
 - A interconexão dissipa ~88 W dentro da base; só com ar a base chega a
   ~200 °C. Com a placa fria, ~57 °C. Consumo ~97 W, ~6,5 pJ/bit.
 - 64 λ por fibra **não fecha** no modelo físico (diafonia); a configuração

@@ -3,6 +3,8 @@ import pytest
 
 from modulos.conexoes.netlist import Netlist, Requisito, Sinal
 from modulos.conexoes.verificador import REGRAS, verificar
+from modulos.dados import comandos as K
+from modulos.dados import ddr5 as D
 
 CTX = {"margem_db": 3.0}
 PADS = ["PCIe5-CML", "DDR5-DQ", "DDR5-DQS", "DDR5-CA"]
@@ -56,7 +58,10 @@ class _Rede:
             n.ligar((c, "ctl"), ("ctl:fpga", "i3c0"), "trilha")
             n.ligar((c, "laser"), (fl, "b"), "fibra")
             det = f"{c}:det"
-            n.bloco(det, "detector_sentido", pai=c, decisao_ps=500.0, potencia_w=0.1)
+            dec = [x for x in K.necessarios("DDR5-4800") if not (op.get("sem_mrw") and x.startswith("MRW"))]
+            n.bloco(det, "detector_sentido", pai=c, decisao_ps=500.0, potencia_w=0.1,
+                    protocolos=["DDR5-4800"], decodifica=dec, dados_decodificados=False,
+                    latencia_decodificacao_ps=op.get("lat_dec", K.latencia_decodificacao_ps("DDR5-4800")))
             n.porta(det, "ca0", "eletrico", "entra"); n.porta(det, "sentido", "controle", "sai")
             n.porta(det, "vdd", "energia", "entra")
             self._vdd(det)
@@ -124,6 +129,14 @@ class _Rede:
         if tipo == "via_rx":
             attrs["terminacao"] = self.op.get("terminacao", {}).get(padrao, TERM[padrao])
         n.porta(v, "e", "eletrico", sentido_e, **attrs)
+        if padrao.startswith("PCIe"):
+            if tipo == "via_tx":
+                n.blocos[v].atributos["deteccao_receptor"] = self.op.get("deteccao", "controlada")
+            else:
+                n.blocos[v].atributos["squelch_ps"] = self.op.get("squelch_ps", 4000.0)
+        if padrao == "DDR5-CA" and tipo == "via_tx" and not self.op.get("sem_ajuste_ca"):
+            n.blocos[v].atributos.update(ajuste_por=f"{chip}:det",
+                                         terminacao_ajustavel=list(D.PERMITIDOS["DDR5-4800"]["terminacao"]))
         n.porta(v, "luz", "optico", "sai" if tipo == "via_tx" else "entra", lambda_nm=lam)
         n.porta(v, "vdd", "energia", "entra"); n.porta(v, "ctl", "controle", "entra")
         self._vdd(v)
@@ -173,7 +186,11 @@ class _Rede:
         chaves = {}
         for lado, lado_e in (("A", a), ("B", b)):
             c = f"tx:{lado}:0:s_{nome}"
-            n.bloco(c, "chave_sentido", pai=f"tx:{lado}:0", comutacao_ps=200.0)
+            n.bloco(c, "chave_sentido", pai=f"tx:{lado}:0", comutacao_ps=200.0, protocolo="DDR5-4800",
+                    papel_eletrico="parece_memoria" if lado == "A" else "parece_controlador",
+                    terminacao_ajustavel=self.op.get("faixa_term", list(D.PERMITIDOS["DDR5-4800"]["terminacao"])),
+                    forca_ajustavel=list(D.PERMITIDOS["DDR5-4800"]["forca"]),
+                    espelha=D.espelho("DDR5-4800") if lado == "A" else [])
             n.porta(c, "pino", "eletrico", "bidir"); n.porta(c, "tx", "eletrico", "sai")
             n.porta(c, "rx", "eletrico", "entra"); n.porta(c, "sentido", "controle", "entra")
             n.ligar(lado_e[-1], (c, "pino"), "trilha")
@@ -207,6 +224,30 @@ def test_rede_minima_passa_em_tudo():
     assert not [v.mensagem for v in rel.violacoes if v.regra != "R14-consumo"]
     assert set(rel.resumo().split()) >= {"OK"}
     assert all(r in rel.resumo() for r in REGRAS)
+
+
+def test_r15_detector_sem_mrw():
+    assert _erros(rede(sem_mrw=True)) >= {"R15-decodificacao", "R16-ajuste"}
+
+
+def test_r15_decodificacao_lenta_demais():
+    assert _erros(rede(lat_dec=20_000.0)) == {"R15-decodificacao"}
+
+
+def test_r16_faixa_de_terminacao_curta():
+    assert _erros(rede(faixa_term=[40.0, 48.0])) == {"R16-ajuste"}
+
+
+def test_r16_odt_de_ca_sem_espelho():
+    assert _erros(rede(sem_ajuste_ca=True)) == {"R16-ajuste"}
+
+
+def test_r17_terminacao_sempre_presente():
+    assert _erros(rede(deteccao="sempre")) == {"R17-pcie"}
+
+
+def test_r17_squelch_lento():
+    assert _erros(rede(squelch_ps=20_000.0)) == {"R17-pcie"}
 
 
 def test_sem_contexto_usa_o_enlace_viavel():
