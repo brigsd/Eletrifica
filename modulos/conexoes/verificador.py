@@ -17,7 +17,7 @@ from modulos.dados.protocolos import PROTOCOLOS
 
 REGRAS = ("R01-caminho", "R02-sentido", "R03-padrao", "R04-banda", "R05-optico",
           "R06-energia", "R07-controle", "R08-capacidade", "R09-tempo", "R10-relogio",
-          "R11-requisito", "R12-orfao")
+          "R11-requisito", "R12-orfao", "R13-temperatura", "R14-consumo")
 
 # perda máxima das trilhas elétricas em cada lado do enlace, na frequência de Nyquist
 ORCAMENTO_TRILHA_DB = {"PCIe5-CML": 8.0, "PCIe4-CML": 8.0, "GDDR7-DQ": 4.0, "GDDR7-EDC": 4.0,
@@ -308,15 +308,16 @@ def _r03(net, rel):
                     rel.violacoes.append(Violacao(R, "erro", s.id, f"{s.id}: dreno aberto sem resistor de pull-up"))
 
 
-def _r04(net, rel):
+def _r04(net, rel, contexto=None):
     R = "R04-banda"
+    orcamentos = {**ORCAMENTO_TRILHA_DB, **(contexto or {}).get("orcamento_trilha_db", {})}
     for s in net.sinais.values():
         pad = PADROES.get(s.padrao)
         if pad is None:
             continue
         fn = _f_nyquist_ghz(pad)
-        orc = ORCAMENTO_TRILHA_DB.get(pad.nome, ORCAMENTO_TRILHA_PADRAO_DB) if pad.alta_velocidade \
-            else ORCAMENTO_TRILHA_LENTO_DB
+        orc = orcamentos.get(pad.nome, ORCAMENTO_TRILHA_PADRAO_DB) if pad.alta_velocidade \
+            else orcamentos.get(pad.nome, ORCAMENTO_TRILHA_LENTO_DB)
         for sentido, cam in s.caminhos.items():
             perda, trecho = 0.0, 0
             for bid in _blocos_do_caminho(cam):
@@ -793,14 +794,180 @@ def _r12(net, rel):
 
 
 # --------------------------------------------------------------------- entrada
+# ------------------------------------------------------------- temperatura
+_ANEL = {}
+
+
+def _anel_e_termico():
+    if not _ANEL:
+        from modulos.optica import enlace as E
+        cfg = E.carregar("viavel")
+        _ANEL["anel"], _ANEL["termico"] = E._anel(cfg), cfg["termico"]
+    return _ANEL["anel"], _ANEL["termico"]
+
+
+def aquecedores(netlist, contexto=None):
+    """Por chip tradutor: quanto o aquecedor do anel precisa sintonizar contra o que ele dá.
+
+    O aquecedor só desloca a ressonância para o vermelho. Com o desvio de projeto ideal, o
+    anel mais vermelho fica no alvo com o aquecedor desligado no calor máximo, e o mais azul
+    precisa de deriva térmica + 2 x (3 sigma de fabricação) a frio. Se a faixa passar de um
+    FSR, qualquer ordem de ressonância serve e sempre cobre.
+    """
+    from modulos.componentes import limites as L
+    ctx = contexto or {}
+    temps, t_min = ctx.get("temperaturas", {}), ctx.get("t_min_c")
+    if t_min is None:
+        return {}
+    anel, tc = _anel_e_termico()
+    sigma = tc["variacao_fabricacao_nm"] * L.SIGMAS_FABRICACAO
+    pmax, desvio = tc["aquecedor_max_mw"], abs(tc["desvio_frio_nm"])
+    eff = anel.aquecedor_nm_mw
+    faixa = pmax * eff * L.AQUECEDOR_FAIXA_UTIL
+    out = {}
+    for c in netlist.por_tipo("chip_tradutor"):
+        if c.id not in temps:
+            continue
+        dt = max(temps[c.id] - t_min, 0.0)
+        deriva = anel.dlambda_dT_nm * dt
+        pede = deriva + 2 * sigma
+        aneis = sum(1 for f in netlist.filhos(c.id) if f.tipo in ("via_tx", "via_rx"))
+        frio_mw = min((deriva + sigma) / eff, pmax)          # anel médio, desvio de projeto ideal
+        out[c.id] = {"temperatura_c": temps[c.id], "delta_k": dt, "deriva_nm": deriva,
+                     "pede_nm": pede, "faixa_nm": faixa, "fsr_nm": anel.fsr_nm,
+                     "cobre": pede <= faixa or faixa >= anel.fsr_nm,
+                     "desvio_necessario_nm": deriva + sigma, "desvio_atual_nm": desvio,
+                     "desvio_atual_ok": deriva + sigma <= desvio and (desvio + sigma) <= faixa,
+                     "aneis": aneis, "aquecedor_frio_mw_anel": frio_mw,
+                     "aquecedor_frio_w": aneis * frio_mw * 1e-3}
+    return out
+
+
+def _r13(net, rel, contexto):
+    R = "R13-temperatura"
+    from modulos.componentes import limites as L
+    ctx = contexto or {}
+    temps = ctx.get("temperaturas")
+    if not temps:
+        return
+    tipos = ctx.get("tipos_pecas", {})
+    celulas = defaultdict(list)
+    for k, t in temps.items():
+        b = net.blocos.get(k)
+        if b is None:
+            if k not in tipos:
+                continue
+            lim, nome = L.limite_peca(tipos[k]), f"peça {k} ({tipos[k]})"
+        elif b.tipo == "celula":
+            lim = L.limite_celula(b.atributos.get("chave"))
+            if t > lim:
+                celulas[(b.atributos.get("peca", "?"), b.atributos.get("chave"), lim)].append(t)
+            continue
+        elif b.tipo == "chip_tradutor":
+            lim, nome = L.CHIP_TRADUTOR_C, f"chip {k}"
+        elif b.tipo == "laser":
+            lim, nome = L.limite_laser(b.atributos.get("tec", True)), f"laser {k}"
+        elif b.tipo == "regulador":
+            lim, nome = L.REGULADOR_C, f"regulador {k}"
+        else:
+            continue
+        if t > lim:
+            rel.violacoes.append(Violacao(R, "erro", k, f"{nome}: {t:.1f} °C > {lim:.0f} °C"))
+    for (peca, chave, lim), ts in sorted(celulas.items()):
+        rel.violacoes.append(Violacao(R, "erro", f"cel:{peca}",
+                                      f"{len(ts)} células sob {peca} acima de {lim:.0f} °C da chave "
+                                      f"{chave} (máx. {max(ts):.1f} °C)"))
+    tb = ctx.get("t_base_max_c")
+    if tb is not None and tb > L.LCP_BASE_C:
+        rel.violacoes.append(Violacao(R, "erro", "base", f"base a {tb:.1f} °C > {L.LCP_BASE_C:.0f} °C do LCP"))
+    for cid, a in aquecedores(net, ctx).items():
+        if not a["cobre"]:
+            rel.violacoes.append(Violacao(R, "erro", cid,
+                                          f"{cid}: aquecedor cobre {a['faixa_nm']:.2f} nm, o local pede "
+                                          f"{a['pede_nm']:.2f} nm ({a['delta_k']:.0f} K de variação)"))
+        elif not a["desvio_atual_ok"]:
+            rel.violacoes.append(Violacao(R, "aviso", cid,
+                                          f"{cid}: desvio a frio de projeto {a['desvio_atual_nm']:.2f} nm; "
+                                          f"precisa de {a['desvio_necessario_nm']:.2f} nm"))
+
+
+# ------------------------------------------------------------- consumo
+# referência: ligação elétrica inteira (PHY dos dois lados + canal), pJ/bit típicos
+REFERENCIA_PJ_BIT = {"DDR5-4800": 15.0, "GDDR7-32": 6.0, "PCIe5": 5.0, "PCIe4": 5.0}
+REFERENCIA_PADRAO_PJ_BIT = 10.0
+TIPOS_INTERCONEXAO = {"chip_tradutor", "via_tx", "via_rx", "detector_sentido", "chave_sentido",
+                      "laser", "conversor_nivel"}
+AQUECEDOR_NOMINAL_MW = 3.0        # se o construtor não disser outro
+
+
+def consumo(netlist, contexto=None):
+    """Potência da interconexão (o que vem além das E/S nativas das peças) e pJ/bit."""
+    from modulos.componentes import limites as L
+    from modulos.dados.protocolos import PAPEIS_DADOS
+    try:
+        from modulos.conexoes import construir as K
+        nominal_mw = float(getattr(K, "AQUECEDOR_MW", AQUECEDOR_NOMINAL_MW))
+    except Exception:
+        nominal_mw = AQUECEDOR_NOMINAL_MW
+    partes = Counter()
+    aneis = 0
+    for b in netlist.blocos.values():
+        a = b.atributos
+        p = float(a.get("potencia_eletrica_w", a.get("potencia_w", 0.0)) or 0.0)
+        if b.tipo in TIPOS_INTERCONEXAO:
+            partes["lasers" if b.tipo == "laser" else "tradutores"] += p
+            if b.tipo in ("via_tx", "via_rx"):
+                aneis += 1
+        elif b.tipo == "controlador" and b.id.startswith("ctl:cel"):
+            partes["controle das células"] += p
+    # o chip já soma o aquecedor nominal de cada anel; troca pelo pior caso
+    nominal_w = aneis * nominal_mw * 1e-3
+    aq = aquecedores(netlist, contexto)
+    if aq:
+        medidos = sum(x["aneis"] for x in aq.values())
+        pior_w = sum(x["aquecedor_frio_w"] for x in aq.values()) + (aneis - medidos) * nominal_mw * 1e-3
+    else:
+        _, tc = _anel_e_termico()
+        pior_w = aneis * tc["aquecedor_max_mw"] * L.AQUECEDOR_FAIXA_UTIL * 1e-3
+    partes["tradutores"] -= nominal_w
+    partes["aquecedores (pior caso)"] = pior_w
+    banda = Counter()
+    for s in netlist.sinais.values():
+        pad = PADROES.get(s.padrao)
+        if pad and pad.alta_velocidade and s.papel in PAPEIS_DADOS:
+            banda[s.protocolo] += pad.taxa_gbps
+    total_w = sum(partes.values())
+    gbps = sum(banda.values())
+    ref = (sum(g * REFERENCIA_PJ_BIT.get(p, REFERENCIA_PADRAO_PJ_BIT) for p, g in banda.items()) / gbps
+           if gbps else 0.0)
+    return {"partes_w": {k: round(v, 3) for k, v in partes.items()}, "total_w": total_w,
+            "banda_gbps": dict(banda), "banda_total_gbps": gbps,
+            "pj_bit": total_w / gbps * 1e3 if gbps else 0.0, "referencia_pj_bit": ref,
+            "aneis": aneis}
+
+
+def _r14(net, rel, contexto):
+    R = "R14-consumo"
+    c = consumo(net, contexto)
+    if not c["banda_total_gbps"]:
+        return
+    meta = (contexto or {}).get("meta_pj_bit")
+    texto = (f"interconexão gasta {c['total_w']:.1f} W, {c['pj_bit']:.1f} pJ/bit além das E/S "
+             f"nativas; uma ligação elétrica inteira custa ~{c['referencia_pj_bit']:.1f} pJ/bit")
+    if meta is not None and c["pj_bit"] > meta:
+        rel.violacoes.append(Violacao(R, "erro", "interconexao", f"{texto}; meta {meta:.1f} pJ/bit"))
+    elif c["pj_bit"] > c["referencia_pj_bit"]:
+        rel.violacoes.append(Violacao(R, "aviso", "interconexao", texto))
+
+
 def verificar(netlist, contexto=None):
-    """Roda as doze regras e devolve um Relatorio."""
+    """Roda as regras e devolve um Relatorio."""
     rel = Relatorio()
     uf, redes = _redes_eletricas(netlist)
     _r01(netlist, rel)
     _r02(netlist, rel, redes)
     _r03(netlist, rel)
-    _r04(netlist, rel)
+    _r04(netlist, rel, contexto)
     _r05(netlist, rel, contexto)
     _r06(netlist, rel)
     _r06_contatos(rel, contexto)
@@ -810,4 +977,6 @@ def verificar(netlist, contexto=None):
     _r10(netlist, rel, uf, redes)
     _r11(netlist, rel)
     _r12(netlist, rel)
+    _r13(netlist, rel, contexto)
+    _r14(netlist, rel, contexto)
     return rel

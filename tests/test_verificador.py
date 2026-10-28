@@ -203,7 +203,8 @@ def _erros(net, ctx=CTX):
 def test_rede_minima_passa_em_tudo():
     rel = verificar(rede(), CTX)
     assert rel.ok, rel.resumo()
-    assert not rel.violacoes, [v.mensagem for v in rel.violacoes]
+    # só o aviso de consumo: a rede mínima tem pouca banda para o que gasta
+    assert not [v.mensagem for v in rel.violacoes if v.regra != "R14-consumo"]
     assert set(rel.resumo().split()) >= {"OK"}
     assert all(r in rel.resumo() for r in REGRAS)
 
@@ -362,6 +363,64 @@ def test_r12_porta_obrigatoria_solta():
     net.bloco("fib:solta", "fibra", comprimento_mm=10.0)
     net.porta("fib:solta", "a", "optico", "bidir"); net.porta("fib:solta", "b", "optico", "bidir")
     assert _erros(net) == {"R12-orfao"}
+
+
+# ------------------------------------------------------------------ temperatura e consumo
+def _ctx_termico(temps, t_min=25.0, **extra):
+    return {**CTX, "temperaturas": temps, "tipos_pecas": {"A": "i5-13600KF", "B": "DDR5-DIMM"},
+            "t_min_c": t_min, "t_base_max_c": max(temps.values()), **extra}
+
+
+def test_r13_temperatura_dentro_dos_limites_passa():
+    temps = {"A": 70.0, "B": 50.0, "tx:A:0": 30.0, "tx:B:0": 30.0, "laser:0": 40.0}
+    assert "R13-temperatura" not in _erros(rede(), _ctx_termico(temps))
+
+
+def test_r13_peca_quente_demais():
+    temps = {"A": 70.0, "B": 92.0, "tx:A:0": 30.0, "tx:B:0": 30.0}
+    assert _erros(rede(), _ctx_termico(temps)) == {"R13-temperatura"}
+
+
+def test_r13_aquecedor_sem_faixa():
+    # 60 K de variação desloca o anel ~3,4 nm: com o pior caso de fabricação passa da faixa
+    temps = {"A": 70.0, "B": 50.0, "tx:A:0": 85.0, "tx:B:0": 30.0}
+    rel = verificar(rede(), _ctx_termico(temps))
+    assert rel.regras_com_erro() == {"R13-temperatura"}
+    assert any("tx:A:0" in v.alvo and "aquecedor" in v.mensagem for v in rel.erros)
+
+
+def test_r13_celula_quente_agrupa_por_peca():
+    net = rede()
+    for b in net.por_tipo("celula"):
+        b.atributos["chave"] = "rele_mems"
+        b.atributos["peca"] = b.id.split(":")[1]
+    temps = {b.id: 95.0 for b in net.por_tipo("celula")}
+    rel = verificar(net, {**CTX, "temperaturas": temps})
+    msgs = [v for v in rel.erros if v.regra == "R13-temperatura"]
+    assert len(msgs) == 2 and all("acima de 85" in v.mensagem for v in msgs)
+
+
+def test_r14_sem_meta_e_aviso():
+    rel = verificar(rede(), CTX)
+    assert rel.ok and rel.contagem("R14-consumo", "aviso") == 1
+
+
+def test_r14_meta_excedida_vira_erro():
+    assert _erros(rede(), {**CTX, "meta_pj_bit": 1.0}) == {"R14-consumo"}
+
+
+def test_consumo_soma_as_partes():
+    from modulos.conexoes.verificador import consumo
+    c = consumo(rede(), CTX)
+    assert c["banda_total_gbps"] > 0 and c["total_w"] > 0
+    assert abs(sum(c["partes_w"].values()) - c["total_w"]) < 1e-2
+    assert c["pj_bit"] == pytest.approx(c["total_w"] / c["banda_total_gbps"] * 1e3)
+
+
+def test_r04_orcamento_de_trilha_vem_do_contexto():
+    net = rede()                       # 15 mm por lado: 4,8 dB a 16 GHz, cabe nos 8 dB do PCIe5
+    assert "R04-banda" not in _erros(net)
+    assert "R04-banda" in _erros(net, {**CTX, "orcamento_trilha_db": {"PCIe5-CML": 1.0}})
 
 
 # ------------------------------------------------------------------ netlist real
