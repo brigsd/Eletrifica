@@ -6,7 +6,7 @@ Conceito em [`conceito.md`](conceito.md). Visualizador 3D em [`../index.html`](.
 
 ## Etapa 1 e 2 — acoplamento e mapeamento
 
-- 33308 células em contato, 0 em ponte, sondadas em 67 ms.
+- 32360 células em contato, 0 em ponte, sondadas em 65 ms.
 - **30 de 30 peças identificadas** só pelo padrão terra/energia/sinal. Erro máximo de posição 0,9 µm e 0,13°.
 - Energizar antes da identificação é recusado: “nenhuma peça identificada ainda”.
 - Trocar peças de lugar e girar qualquer peça em qualquer ângulo (37°, 63,5°, 133°, 301°) continua identificando certo (`tests/test_sistema.py`).
@@ -25,15 +25,15 @@ Conceito em [`conceito.md`](conceito.md). Visualizador 3D em [`../index.html`](.
 
 A interconexão dissipa **149 W** dentro da própria base (chips tradutores e lasers). Só com o ar do gabinete a base chegaria a 267 °C. Com a placa fria sob a base (1000 W/m²K, líquido a 35 °C) e vias térmicas de cobre em 5% da área atravessando o LCP (troca efetiva 952 W/m²K), em carga máxima a base chega a **64 °C**. Sem as vias, o LCP de 1 mm segura o calor e a placa fria sozinha não basta.
 
-- Aquecedor dos anéis: o local mais exigente pede 3,40 nm de sintonia; o aquecedor dá 4,00 nm. 0 chips sem faixa. A frio, os aquecedores gastam 29,3 W.
-- Consumo da interconexão: **166 W**, 11,2 pJ/bit sobre 14,8 Tb/s; uma ligação elétrica inteira custa ~6,3 pJ/bit. Partes: tradutores 88,1 W, controle das células 0,0 W, lasers 48,5 W, aquecedores (pior caso) 29,3 W.
+- Aquecedor dos anéis: o local mais exigente pede 3,40 nm de sintonia; o aquecedor dá 4,00 nm. 0 chips sem faixa. A frio, os aquecedores gastam 29,2 W.
+- Consumo da interconexão: **166 W**, 11,2 pJ/bit sobre 14,8 Tb/s; uma ligação elétrica inteira custa ~6,3 pJ/bit. Partes: tradutores 88,1 W, controle das células 0,0 W, lasers 48,5 W, aquecedores (pior caso) 29,2 W.
 
 Nos tradutores ópticos:
 
 | Peça | °C |
 |---|---|
-| CPU | 44,5 |
-| DIMM | 36,4 |
+| CPU | 44,6 |
+| DIMM | 36,8 |
 | FPGA | 37,6 |
 | GPU | 52,1 |
 | MEM0 | 48,0 |
@@ -61,7 +61,7 @@ Nos tradutores ópticos:
 | MEM22 | 48,2 |
 | MEM23 | 47,1 |
 | PCH | 36,8 |
-| PONTE | 39,9 |
+| PONTE | 39,3 |
 
 ## Etapa 4 — enlace óptico
 
@@ -107,10 +107,10 @@ Erros por regra, do conceito até o projeto atual:
 
 | Regra | conceito: tradutor ao lado, célula com MOSFET | tradutor sob a peça | + relé MEMS na célula | + plano de energia com 2 oz | + placa fria sob a base | + vias térmicas até a placa |
 |---|---|---|---|---|---|---|
-| banda | 8730 | 7702 | 0 | 0 | 0 | 0 |
+| banda | 9058 | 7702 | 0 | 0 | 0 | 0 |
 | energia | 1 | 1 | 1 | 0 | 0 | 0 |
-| temperatura | 148 | 166 | 168 | 166 | 61 | 0 |
-| **total** | **8879** | **7869** | **169** | **166** | **61** | **0** |
+| temperatura | 149 | 165 | 167 | 166 | 61 | 0 |
+| **total** | **9208** | **7868** | **168** | **166** | **61** | **0** |
 
 O que cada decisão resolveu:
 
@@ -126,27 +126,27 @@ O que cada decisão resolveu:
 
 Folga de cada número escolhido: [`sensibilidade.md`](sensibilidade.md). Contato imperfeito (peça inclinada, sujeira, pino torto): [`defeitos.md`](defeitos.md).
 
-### Boot emulado na netlist: pronto em 543 ms
+### Boot emulado na netlist: pronto em 541 ms
 
 Máquina de estados com guarda em cada transição (`modulos/sistema/boot.py`):
 
 | Etapa | Concluída em |
 |---|---|
 | Sondagem | 0,00 ms |
-| Identificação | 66,62 ms |
-| Configuração | 69,62 ms |
-| Fonte e standby | 170,62 ms |
-| ME do chipset | 200,72 ms |
-| Trilhos principais | 201,82 ms |
-| Tradutores e lasers | 202,32 ms |
-| Anéis travados | 202,52 ms |
-| Núcleo da CPU | 203,19 ms |
-| Relógio e reset | 204,19 ms |
-| BIOS pela DMI | 224,19 ms |
-| Treino da memória | 424,19 ms |
-| PCIe e GDDR7 | 509,51 ms |
-| Banco unificado | 543,17 ms |
-| Pronto | 543,17 ms |
+| Identificação | 64,72 ms |
+| Configuração | 67,72 ms |
+| Fonte e standby | 168,72 ms |
+| ME do chipset | 198,82 ms |
+| Trilhos principais | 199,92 ms |
+| Tradutores e lasers | 200,42 ms |
+| Anéis travados | 200,62 ms |
+| Núcleo da CPU | 201,29 ms |
+| Relógio e reset | 202,29 ms |
+| BIOS pela DMI | 222,29 ms |
+| Treino da memória | 422,29 ms |
+| PCIe e GDDR7 | 507,62 ms |
+| Banco unificado | 541,27 ms |
+| Pronto | 541,27 ms |
 
 ### O que o tradutor faz além de copiar
 
@@ -170,11 +170,11 @@ Nem a i5-13600KF nem a GPU têm CXL. Com o banco unificado da base (seção segu
 A GPU só tem uma porta rápida, a de memória; o PCIe até a CPU é o barramento lento do offloading. Então o banco compartilhado entra pela porta de memória da GPU. A base está no meio de cada pino e faz o que uma placa-mãe não faz (`modulos/dados/memoria_unificada.py`):
 
 - **Mais chips por canal.** 24 chips GDDR7 de 16 Gb; a GPU enxerga 12 chips de 32 Gb (o maior do padrão), cada um feito de 2 vizinhos. O seletor do grupo escolhe o chip pelo comando, como num LRDIMM: 480 seletores, 12 detectores, e uma linha de atraso em cada porta deixa os chips do grupo chegando juntos.
-- **A CPU nos mesmos chips.** Um canal DDR5 da CPU vai para a ponte, que se apresenta como um DIMM de 48 GB e declara CL53 no SPD (o DDR5 aceita até CL66; a leitura pela ponte leva 22,0 ns, com 1,61 ns de caminho até os chips e 1,39 ns de volta).
+- **A CPU nos mesmos chips.** Um canal DDR5 da CPU vai para a ponte, que se apresenta como um DIMM de 48 GB e declara CL53 no SPD (o DDR5 aceita até CL66; a leitura pela ponte leva 21,9 ns, com 1,61 ns de caminho até os chips e 1,30 ns de volta).
 - **Um dono por rank.** 480 muxes de posse, comandados pelo FPGA; enquanto um rank é da CPU, a base absorve ~6,3 milhões de refresh por segundo que a GPU manda para ele.
 - **Mesmo endereço dos dois lados.** No boot a ponte aprende os dois mapas com 29 sondas da GPU e 28 da CPU e confere com 64 sondas aleatórias de cada lado: **0 erros**; varrer o banco leva 33,6 ms. Um mapa fora da família (rank misturado com bit baixo) é avisado.
 
-Netlist: R19 (posse) 0 erros, R20 (banco) 0 erros; boot com o banco pronto em 543 ms.
+Netlist: R19 (posse) 0 erros, R20 (banco) 0 erros; boot com o banco pronto em 541 ms.
 
 Emulação bit a bit:
 
@@ -200,9 +200,9 @@ Offload: a mesma GPU com 24 GB de VRAM a 1536 GB/s, e o resto na RAM da CPU (doi
 | Enlace | Atraso dos dados | Trilha elétrica na mesma posição | Placa-mãe comum |
 |---|---|---|---|
 | CPU-DIMM | 478 ps | 714 ps | 408 ps |
-| CPU-PONTE | 246 ps | 422 ps | 408 ps |
+| CPU-PONTE | 222 ps | 422 ps | 408 ps |
 | GPU-MEM14 | 226 ps | 340 ps | 102 ps |
-| PONTE-MEM14 | 403 ps | 626 ps | 102 ps |
+| PONTE-MEM14 | 365 ps | 626 ps | 102 ps |
 | CPU-GPU | 338 ps | 544 ps | 1020 ps |
 | CPU-PCH | 531 ps | 714 ps | 816 ps |
 | CPU-FPGA | 1023 ps | 952 ps | 816 ps |
