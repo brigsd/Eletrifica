@@ -238,4 +238,10 @@ if __name__ == "__main__":
     plano = DR.rotear(cfg, canais_por_fibra=opt["canais_por_fibra"])
     r = varrer((m, cfg, plano, opt))
     print("erros no nominal:", r["erros_nominais"] or "nenhum")
-    print(tabela_md(r))
+    from modulos.sistema.base import PROJETO
+    texto = ("# Sensibilidade\n\nGerado por `python3 -m modulos.conexoes.sensibilidade`. "
+             "Não edite à mão.\n\nPara cada número escolhido no projeto, o valor em que o projeto "
+             "atual passa a reprovar e a regra que quebra. Folga abaixo de 20 % em negrito.\n\n"
+             + tabela_md(r) + "\n")
+    (PROJETO / "docs" / "sensibilidade.md").write_text(texto)
+    print(texto)

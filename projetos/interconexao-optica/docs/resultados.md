@@ -23,27 +23,32 @@ Conceito em [`conceito.md`](conceito.md). Visualizador 3D em [`../index.html`](.
 
 ## Temperatura da base
 
-Carga máxima, ar a 35 °C: a base chega a **118 °C**. Nos tradutores ópticos:
+A interconexão dissipa **88 W** dentro da própria base (chips tradutores e lasers). Só com o ar do gabinete a base chegaria a 199 °C. Com a placa fria sob a base (1000 W/m²K, líquido a 35 °C), em carga máxima a base chega a **57 °C**.
+
+- Aquecedor dos anéis: o local mais exigente pede 3,01 nm de sintonia; o aquecedor dá 4,00 nm. 0 chips sem faixa. A frio, os aquecedores gastam 16,4 W.
+- Consumo da interconexão: **97 W**, 6,5 pJ/bit sobre 14,8 Tb/s; uma ligação elétrica inteira custa ~6,3 pJ/bit. Partes: tradutores 50,7 W, controle das células 0,0 W, lasers 29,6 W, aquecedores (pior caso) 16,4 W.
+
+Nos tradutores ópticos:
 
 | Peça | °C |
 |---|---|
-| CPU | 94,6 |
-| DIMM0 | 43,7 |
-| DIMM1 | 42,2 |
-| FPGA | 63,3 |
-| GPU | 88,7 |
-| MEM0 | 85,0 |
-| MEM1 | 88,8 |
-| MEM2 | 87,7 |
-| MEM3 | 82,8 |
-| MEM4 | 92,5 |
-| MEM5 | 88,4 |
-| MEM6 | 88,5 |
-| MEM7 | 88,9 |
-| MEM8 | 82,2 |
-| MEM9 | 83,3 |
-| MEM10 | 87,3 |
-| MEM11 | 85,2 |
+| CPU | 42,0 |
+| DIMM0 | 35,2 |
+| DIMM1 | 35,5 |
+| FPGA | 37,5 |
+| GPU | 47,6 |
+| MEM0 | 43,2 |
+| MEM1 | 46,7 |
+| MEM2 | 46,0 |
+| MEM3 | 42,6 |
+| MEM4 | 45,3 |
+| MEM5 | 43,0 |
+| MEM6 | 43,3 |
+| MEM7 | 44,5 |
+| MEM8 | 42,3 |
+| MEM9 | 42,7 |
+| MEM10 | 46,5 |
+| MEM11 | 45,3 |
 
 ## Etapa 4 — enlace óptico
 
@@ -87,22 +92,27 @@ Cada sinal é seguido salto a salto: pino → célula → trilha na base → chi
 
 Erros por regra, do conceito até o projeto atual:
 
-| Regra | conceito: tradutor ao lado, célula com MOSFET | tradutor sob a peça | + relé MEMS na célula | + plano de energia com 2 oz |
-|---|---|---|---|---|
-| banda | 2658 | 2520 | 0 | 0 |
-| energia | 1 | 1 | 1 | 0 |
-| tempo | 46 | 0 | 0 | 0 |
-| **total** | **2705** | **2521** | **1** | **0** |
+| Regra | conceito: tradutor ao lado, célula com MOSFET | tradutor sob a peça | + relé MEMS na célula | + plano de energia com 2 oz | + placa fria sob a base |
+|---|---|---|---|---|---|
+| banda | 2658 | 2520 | 0 | 0 | 0 |
+| energia | 1 | 1 | 1 | 0 | 0 |
+| tempo | 46 | 0 | 0 | 0 | 0 |
+| temperatura | 75 | 89 | 96 | 96 | 0 |
+| **total** | **2780** | **2610** | **97** | **96** | **0** |
 
 O que cada decisão resolveu:
 
 - **banda** (conceito): cel:CPU:DDR5_A_A_DQ0: banda 0,1 GHz < 2,4 GHz de DDR5-DQ
 - **energia** (conceito): CPU:VCCIN: 21 pinos acima de 1 A (máx. 1,21 A)
 - **tempo** (conceito): GPU.G8_DQ16->MEM3.GX_DQ16 (ida): 1120 ps > 1000 ps
+- **temperatura** (conceito): peça MEM5 (GDDR7): 124,4 °C > 105 °C
 
 - **Tradutor sob a peça:** com o chip ao lado, trilhas de até 120 mm na base estouram o atraso e o desalinhamento da GDDR7; numa camada de fotônica debaixo da peça, cada pino desce poucos milímetros até o seu chip.
 - **Relé MEMS na célula:** a célula do conceito usa a mesma chave para 1 A de energia e para sinal de 32 Gb/s. Uma chave de transistor com R_on baixo o bastante para a energia tem dezenas de pF desligada, e isso derruba a banda de todo sinal rápido. Um relé, quando aberto, é um vão de ar: 20 fF. Ele só pode mudar de estado sem corrente, e a configuração das células acontece antes de energizar.
 - **Plano de energia com 2 oz:** com 1 oz a corrente se concentra nos pinos de VCCIN perto do VRM e alguns passam de 1 A.
+- **Placa fria sob a base:** a interconexão dissipa dezenas de watts dentro da base; com o ar do gabinete, peças, células (relé até 85 °C) e anéis passam do limite, e o aquecedor não cobre a variação de temperatura.
+
+Folga de cada número escolhido: [`sensibilidade.md`](sensibilidade.md). Contato imperfeito (peça inclinada, sujeira, pino torto): [`defeitos.md`](defeitos.md).
 
 ### Boot emulado na netlist: pronto em 551 ms
 

@@ -84,8 +84,14 @@ def locais_tradutores(configuracao, afastamento_mm=2.0):
 
 
 def simular(base, configuracao, zonas, carga="max", perdas_vrm_w=15.0,
-            perdas_contatos_w=5.0, passo_mm=2.0, t_amb=35.0, h_conv=30.0, tempos_s=None):
-    """h_conv em W/(m².K) por face: ~30 com ar forçado do gabinete, ~10-15 em convecção natural."""
+            perdas_contatos_w=5.0, passo_mm=2.0, t_amb=35.0, h_conv=30.0, tempos_s=None,
+            h_inferior=None, fontes_extra=()):
+    """h_conv em W/(m².K) por face: ~30 com ar forçado do gabinete, ~10-15 em convecção natural.
+
+    h_inferior: troca a face de baixo (placa fria com líquido: ~1000-3000, já com o material
+    de interface). fontes_extra: [(x, y, largura, profundidade, W)] dissipados na própria base,
+    como chips tradutores, aquecedores e lasers.
+    """
     gx = int(math.ceil(base.largura / passo_mm))
     gy = int(math.ceil(base.profundidade / passo_mm))
     xs = (np.arange(gx) + 0.5) * passo_mm
@@ -105,6 +111,10 @@ def simular(base, configuracao, zonas, carga="max", perdas_vrm_w=15.0,
         _espalhar(fontes, passo_mm, X, Y, dentro, p)
         if pc.nome == "CPU":
             _espalhar(fontes, passo_mm, X, Y, dentro, perdas_contatos_w)
+    for fx, fy, fw, fd, fp in fontes_extra:
+        _espalhar(fontes, passo_mm, X, Y,
+                  lambda x, y, fx=fx, fy=fy, fw=fw, fd=fd: (np.abs(x - fx) <= fw / 2) & (np.abs(y - fy) <= fd / 2),
+                  fp)
     z = zonas.get("vrm_cpu")
     if z:
         _espalhar(fontes, passo_mm, X, Y,
@@ -113,7 +123,7 @@ def simular(base, configuracao, zonas, carga="max", perdas_vrm_w=15.0,
 
     h = passo_mm * 1e-3
     g_lat = K_COBRE * COBRE_ESP_M + K_LCP * LCP_ESP_M      # W/K entre nós vizinhos (quadrado)
-    g_conv = 2 * h_conv * h * h
+    g_conv = (h_conv + (h_conv if h_inferior is None else h_inferior)) * h * h
     cap = (RHOC_COBRE * COBRE_ESP_M + RHOC_LCP * LCP_ESP_M) * h * h
     n = gx * gy
     idx = np.arange(n).reshape(gy, gx)

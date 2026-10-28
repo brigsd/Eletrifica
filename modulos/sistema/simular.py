@@ -13,7 +13,8 @@ import re
 import numpy as np
 
 from modulos.conexoes.construir import construir
-from modulos.conexoes.verificador import REGRAS, verificar
+from modulos.conexoes import contexto as CX
+from modulos.conexoes.verificador import REGRAS, aquecedores, consumo, verificar
 from modulos.dados import emulador as DE
 from modulos.dados import latencia as DL
 from modulos.dados import roteamento as DR
@@ -36,11 +37,12 @@ TIPO_FIBRA = {"DDR5-4800": "DDR5", "GDDR7-32": "GDDR7", "PCIe5": "PCIe", "PCIe4"
 R_FOLHA_1OZ_MOHM = 0.5 / 2          # dois planos de 1 oz em paralelo, como o modelo de energia usa
 
 # do conceito até o projeto atual: cada linha muda uma decisão
-CENARIOS = (
-    ("conceito: tradutor ao lado, célula com MOSFET", "ao_lado", "mosfet_potencia", 1),
-    ("tradutor sob a peça", "sob_peca", "mosfet_potencia", 1),
-    ("+ relé MEMS na célula", "sob_peca", "rele_mems", 1),
-    ("+ plano de energia com 2 oz", "sob_peca", "rele_mems", 2),
+CENARIOS = (   # nome, tradutores, chave da célula, cobre do plano (oz), placa fria (W/m²K; None = ar)
+    ("conceito: tradutor ao lado, célula com MOSFET", "ao_lado", "mosfet_potencia", 1, None),
+    ("tradutor sob a peça", "sob_peca", "mosfet_potencia", 1, None),
+    ("+ relé MEMS na célula", "sob_peca", "rele_mems", 1, None),
+    ("+ plano de energia com 2 oz", "sob_peca", "rele_mems", 2, None),
+    ("+ placa fria sob a base", "sob_peca", "rele_mems", 2, 1000),
 )
 
 
@@ -52,6 +54,23 @@ def _canal(cfg, gbps, simbolo):
 
 def _perturbacao(t_us, salto_k=10.0, tau_us=200.0, inicio_us=600.0):
     return 0.0 if t_us < inicio_us else salto_k * (1 - math.exp(-(t_us - inicio_us) / tau_us))
+
+
+def _fontes_calor(nl):
+    """Calor que a interconexão dissipa na própria base: chips tradutores e lasers."""
+    out = []
+    for c in nl.por_tipo("chip_tradutor"):
+        p = float(c.atributos.get("potencia_w", 0.0)) + sum(
+            float(f.atributos.get("potencia_w", 0.0) or 0.0) for f in nl.filhos(c.id))
+        out.append((c.posicao[0], c.posicao[1], c.atributos["largura_mm"], c.atributos["profundidade_mm"], p))
+    for l in nl.por_tipo("laser"):
+        out.append((l.posicao[0], l.posicao[1], 40.0, 25.0, float(l.atributos["potencia_eletrica_w"])))
+    return out
+
+
+def _termico(m, cfg, nl, dist, placa_fria):
+    return difusao.simular(m.base, cfg, m.zonas, perdas_contatos_w=dist["perdas_w"],
+                           fontes_extra=_fontes_calor(nl), h_inferior=placa_fria)
 
 
 def _contatos(m, cfg, nome_chave, cobre_oz):
@@ -144,11 +163,6 @@ def executar():
                                     "desbalanco_fase_pct", "erro_reta_carga_mv", "eficiencia")}
     R["curto"] = {k: curto[k] for k in ("pico_a", "tempo_disparo_ns", "energia_chave_uj")}
 
-    # 6. térmico ----------------------------------------------------------------
-    term = difusao.simular(m.base, cfg, m.zonas, perdas_contatos_w=dist["perdas_w"])
-    R["termico"] = {"max_c": float(term.regime.max()), "amb_c": term.t_amb,
-                    "tradutores": {k: v["regime_c"] for k, v in term.tradutores.items()}}
-
     # 7. óptica -----------------------------------------------------------------
     cfgs = {n: E.carregar(n) for n in ("original", "ajustada", "viavel")}
     R["optica"] = {n: {"simples": E.calculo_simples(c), "fisico": E.orcamento(c)}
@@ -204,19 +218,34 @@ def executar():
 
     # 11. conexões: a netlist do sistema inteiro, o verificador e o boot -------------
     R["conexoes"] = []
-    for nome, pos, ch, oz in CENARIOS:
+    for nome, pos, ch, oz, placa in CENARIOS:
         nl = construir(m, cfg, plano, viavel, posicionamento=pos, chave=ch)
-        rel = verificar(nl, {"contatos": [_contatos(m, cfg, ch, oz)]})
+        d = _contatos(m, cfg, ch, oz)
+        tc = _termico(m, cfg, nl, d, placa)
+        rel = verificar(nl, CX.montar(m, cfg, nl, tc, [d]))
         exemplos = {}
         for v in rel.erros:
             exemplos.setdefault(v.regra, v.mensagem)
         R["conexoes"].append({"nome": nome, "posicionamento": pos, "chave": ch, "cobre_oz": oz,
+                              "placa_fria": placa, "base_max_c": float(tc.regime.max()),
                               "por_regra": {k: rel.contagem(k, "erro") for k in REGRAS},
                               "erros": len(rel.erros), "exemplos": exemplos})
     nl = construir(m, cfg, plano, viavel, posicionamento=pj.get("tradutores", "sob_peca"),
                    chave=pj.get("chave_celula"))
-    rel = verificar(nl, {"contatos": [dist]})
-    R["netlist"] = {**nl.resumo(), "erros": len(rel.erros),
+    term = _termico(m, cfg, nl, dist, pj.get("placa_fria_h_w_m2k"))
+    R["termico"] = {"max_c": float(term.regime.max()), "amb_c": term.t_amb,
+                    "calor_interconexao_w": sum(f[4] for f in _fontes_calor(nl)),
+                    "placa_fria": pj.get("placa_fria_h_w_m2k"),
+                    "tradutores": {k: v["regime_c"] for k, v in term.tradutores.items()}}
+    ctx = CX.montar(m, cfg, nl, term, [dist])
+    rel = verificar(nl, ctx)
+    aq = aquecedores(nl, ctx)
+    R["consumo"] = consumo(nl, ctx)
+    R["aquecedores"] = {"frio_w": sum(a["aquecedor_frio_w"] for a in aq.values()),
+                        "sem_faixa": sum(not a["cobre"] for a in aq.values()),
+                        "pede_max_nm": max(a["pede_nm"] for a in aq.values()),
+                        "faixa_nm": next(iter(aq.values()))["faixa_nm"]}
+    R["netlist"] = {**nl.resumo(), "erros": len(rel.erros), "avisos": len(rel.violacoes) - len(rel.erros),
                     "por_regra": {k: rel.contagem(k, "erro") for k in REGRAS}}
     ex = emular(nl, sim={"sondagem_us": R["mapeamento"]["tempo_sondagem_ms"] * 1e3,
                          "vrm_assentamento_us": deg["assentamento_us"],
@@ -358,7 +387,8 @@ def _graficos(g7, trav, livre, deg):
 NOME_REGRA = {"R01-caminho": "caminho", "R02-sentido": "sentido", "R03-padrao": "nível elétrico",
               "R04-banda": "banda", "R05-optico": "luz", "R06-energia": "energia",
               "R07-controle": "controle", "R08-capacidade": "capacidade", "R09-tempo": "tempo",
-              "R10-relogio": "relógio", "R11-requisito": "requisito", "R12-orfao": "órfão"}
+              "R10-relogio": "relógio", "R11-requisito": "requisito", "R12-orfao": "órfão",
+              "R13-temperatura": "temperatura", "R14-consumo": "consumo"}
 
 
 def _secao_conexoes(R):
@@ -390,7 +420,12 @@ def _secao_conexoes(R):
           "aberto, é um vão de ar: 20 fF. Ele só pode mudar de estado sem corrente, e a "
           "configuração das células acontece antes de energizar.",
           "- **Plano de energia com 2 oz:** com 1 oz a corrente se concentra nos pinos de VCCIN "
-          "perto do VRM e alguns passam de 1 A.", ""]
+          "perto do VRM e alguns passam de 1 A.",
+          "- **Placa fria sob a base:** a interconexão dissipa dezenas de watts dentro da base; "
+          "com o ar do gabinete, peças, células (relé até 85 °C) e anéis passam do limite, e o "
+          "aquecedor não cobre a variação de temperatura.", "",
+          "Folga de cada número escolhido: [`sensibilidade.md`](sensibilidade.md). "
+          "Contato imperfeito (peça inclinada, sujeira, pino torto): [`defeitos.md`](defeitos.md).", ""]
     if bt["ok"]:
         L += [f"### Boot emulado na netlist: pronto em {bt['tempos_ms']['Pronto']:.0f} ms", "",
               "Máquina de estados com guarda em cada transição (`modulos/sistema/boot.py`):", "",
@@ -436,8 +471,21 @@ def _relatorio(R):
           "![VRM](vrm-degrau.svg)", ""]
 
     tm = R["termico"]
+    sem_placa = next(c for c in R["conexoes"] if c["placa_fria"] is None and c["cobre_oz"] == 2)
+    aq, co = R["aquecedores"], R["consumo"]
     L += ["## Temperatura da base", "",
-          f"Carga máxima, ar a {tm['amb_c']:.0f} °C: a base chega a **{tm['max_c']:.0f} °C**. "
+          f"A interconexão dissipa **{tm['calor_interconexao_w']:.0f} W** dentro da própria base "
+          f"(chips tradutores e lasers). Só com o ar do gabinete a base chegaria a "
+          f"{sem_placa['base_max_c']:.0f} °C. Com a placa fria sob a base "
+          f"({tm['placa_fria']} W/m²K, líquido a {tm['amb_c']:.0f} °C), em carga máxima a base chega a "
+          f"**{tm['max_c']:.0f} °C**.", "",
+          f"- Aquecedor dos anéis: o local mais exigente pede {aq['pede_max_nm']:.2f} nm de "
+          f"sintonia; o aquecedor dá {aq['faixa_nm']:.2f} nm. {aq['sem_faixa']} chips sem faixa. "
+          f"A frio, os aquecedores gastam {aq['frio_w']:.1f} W.",
+          f"- Consumo da interconexão: **{co['total_w']:.0f} W**, "
+          f"{co['pj_bit']:.1f} pJ/bit sobre {co['banda_total_gbps'] / 1000:.1f} Tb/s; uma ligação "
+          f"elétrica inteira custa ~{co['referencia_pj_bit']:.1f} pJ/bit. Partes: "
+          + ", ".join(f"{k} {v:.1f} W" for k, v in co["partes_w"].items()) + ".", "",
           "Nos tradutores ópticos:", "", "| Peça | °C |", "|---|---|"]
     L += [f"| {n} | {t:.1f} |" for n, t in sorted(tm["tradutores"].items(), key=lambda kv: _natural(kv[0]))]
     L += [""]

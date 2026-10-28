@@ -37,8 +37,14 @@ Os achados principais:
    mover depois — a reconfiguração tem de vir antes do treino.
 6. **As conexões fecham salto a salto.** Cada sinal é seguido de pino a pino
    (célula, trilha, tradutor, laser, fibra, receptor, driver), com energia,
-   controle e relógio de cada bloco. O conceito, como estava, dá ~2.700 erros no
-   verificador; três decisões de projeto zeram todos, e o boot emulado completa.
+   controle e relógio de cada bloco. O conceito, como estava, dá ~2.800 erros no
+   verificador; quatro decisões de projeto zeram todos, e o boot emulado completa.
+7. **Contato imperfeito é detectado.** Canto levantado de 0,2° já degrada a CPU;
+   0,5° a recusa. Sujeira condutiva e pino torto viram ponte e a peça não liga.
+   Tabela em [`docs/defeitos.md`](docs/defeitos.md).
+8. **Folga dos números escolhidos:** nenhum abaixo de 20 %; os mais justos são
+   vias por chip (25 %) e perda da trilha (29 %). Ver
+   [`docs/sensibilidade.md`](docs/sensibilidade.md).
 
 ## Decisões de projeto que o verificador exigiu
 
@@ -49,6 +55,7 @@ Ficam em `montagem.json`, chave `projeto`:
 | `tradutores: sob_peca` | Ao lado da peça, trilhas de até 120 mm estouram atraso e desalinhamento da GDDR7. Numa camada de fotônica sob a peça, o pino desce poucos mm. |
 | `chave_celula: rele_mems` | A mesma chave não serve para 1 A de energia e para 32 Gb/s: transistor com R_on baixo tem dezenas de pF desligado. Relé aberto é vão de ar (~20 fF); só comuta sem corrente, e as células são configuradas antes de energizar. |
 | `cobre_plano_oz: 2` | Com 1 oz, pinos de VCCIN perto do VRM passam de 1 A. |
+| `placa_fria_h_w_m2k: 1000` | A interconexão dissipa ~88 W dentro da base; só com ar ela chega a ~200 °C e peças, relés e anéis passam do limite. Com placa fria de líquido sob a base, ~57 °C. |
 
 ## Fontes do projeto
 

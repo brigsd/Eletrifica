@@ -24,6 +24,7 @@
     "chave_celula": "rele_mems",
     "tradutores": "sob_peca",
     "cobre_plano_oz": 2,
+    "placa_fria_h_w_m2k": 1000,
     "config_optica": "viavel"
   },
   "zonas": {
