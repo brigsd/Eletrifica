@@ -9,6 +9,7 @@ Os números típicos ficam nas constantes abaixo.
 """
 import math
 from collections import defaultdict
+from contextlib import contextmanager
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
@@ -17,7 +18,7 @@ from modulos.conexoes.netlist import Netlist, Requisito, Sinal
 from modulos.conexoes.padroes import PADROES, padrao_do_pino
 from modulos.conexoes.posicao import Ocupacao, manhattan
 from modulos.optica import enlace as E
-from modulos.sistema.celula import chave as chave_da_celula
+from modulos.sistema.celula import Chave, chave as chave_da_celula
 
 # --- chip tradutor -----------------------------------------------------------
 VIAS_MAX = 96                 # vias (tx + rx) por chip
@@ -54,6 +55,13 @@ CELULAS_POR_MATRIZ = 4096     # endereçamento linha x coluna de um controlador 
 MARGEM_REGULADOR = 1.25
 PULLUP_OHM = 1000.0
 
+# constantes que construir(..., parametros={...}) pode sobrepor numa chamada
+PARAMETROS = ("VIAS_MAX", "CHIP_MM", "AFASTAMENTO_CHIP_MM", "VDD_CHIP_V", "PJ_BIT_TX", "PJ_BIT_RX",
+              "AQUECEDOR_MW", "CONTROLE_CHIP_W", "VERTICAL_FOTONICA_MM", "Z_TRILHA_OHM",
+              "PERDA_DB_MM_GHZ", "CAMADAS_SINAL", "PASSO_TRILHA_MM", "LASER_EFICIENCIA", "LASER_TEC_W",
+              "DIVISOR_SAIDAS_MAX", "PERDA_FIBRA_DB_MM", "PERDA_CONECTOR_DB",
+              "DISPOSITIVOS_POR_I3C", "CELULAS_POR_MATRIZ", "MARGEM_REGULADOR", "PULLUP_OHM")
+
 DIREITO = {"ida": "sai", "volta": "entra", "duplo": "bidir"}
 INVERSO = {"ida": "entra", "volta": "sai", "duplo": "bidir"}
 
@@ -82,7 +90,7 @@ class _Construtor:
         if posicionamento not in ("ao_lado", "sob_peca"):
             raise ValueError(posicionamento)
         self.m, self.cfg, self.plano, self.opt = montagem, configuracao, plano, cfg_optica
-        self.chave_celula = chave_da_celula(chave)
+        self.chave_celula = chave if isinstance(chave, Chave) else chave_da_celula(chave)
         self.posicionamento = posicionamento
         self.nl = Netlist()
         self.pecas = {p.nome: p for p in configuracao.pecas}
@@ -972,18 +980,36 @@ class _CanalLento:
             enlace, sentido, protocolo, papel, grupo
 
 
-def construir(montagem, configuracao, plano, cfg_optica, chave=None, posicionamento="ao_lado"):
-    """chave: nome em modulos.sistema.celula.CHAVES; posicionamento: "ao_lado" | "sob_peca"."""
-    c = _Construtor(montagem, configuracao, plano, cfg_optica, chave, posicionamento)
-    c.infraestrutura()
-    c.chips()
-    c.fibras()
-    c.sinais_rapidos()
-    c.sinais_lentos()
-    c.sideband()
-    c.relogios()
-    c.laser()
-    c.energia_chips()
-    c.requisitos()
-    c.fechar_reguladores()
-    return c.nl
+@contextmanager
+def _sobrepor(parametros):
+    """Troca as constantes do módulo só durante uma construção e devolve as originais."""
+    desconhecidos = set(parametros) - set(PARAMETROS)
+    if desconhecidos:
+        raise KeyError(f"parâmetros desconhecidos: {sorted(desconhecidos)}")
+    g = globals()
+    antes = {k: g[k] for k in parametros}
+    g.update(parametros)
+    try:
+        yield
+    finally:
+        g.update(antes)
+
+
+def construir(montagem, configuracao, plano, cfg_optica, chave=None, posicionamento="ao_lado",
+              parametros=None):
+    """chave: nome em modulos.sistema.celula.CHAVES ou uma Chave; posicionamento:
+    "ao_lado" | "sob_peca"; parametros: {constante: valor} sobreposto só nesta chamada."""
+    with _sobrepor(parametros or {}):
+        c = _Construtor(montagem, configuracao, plano, cfg_optica, chave, posicionamento)
+        c.infraestrutura()
+        c.chips()
+        c.fibras()
+        c.sinais_rapidos()
+        c.sinais_lentos()
+        c.sideband()
+        c.relogios()
+        c.laser()
+        c.energia_chips()
+        c.requisitos()
+        c.fechar_reguladores()
+        return c.nl
