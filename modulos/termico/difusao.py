@@ -83,6 +83,13 @@ def locais_tradutores(configuracao, afastamento_mm=2.0):
     return pos
 
 
+def h_atraves_da_base(h_placa, fracao_vias=0.0):
+    """Troca efetiva até a placa fria: o calor atravessa o LCP (e as vias térmicas de cobre,
+    em paralelo) antes de chegar ao líquido."""
+    k = K_LCP * (1 - fracao_vias) + K_COBRE * fracao_vias
+    return 1.0 / (1.0 / h_placa + LCP_ESP_M / k)
+
+
 def simular(base, configuracao, zonas, carga="max", perdas_vrm_w=15.0,
             perdas_contatos_w=5.0, passo_mm=2.0, t_amb=35.0, h_conv=30.0, tempos_s=None,
             h_inferior=None, fontes_extra=()):

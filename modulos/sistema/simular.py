@@ -41,12 +41,13 @@ TIPO_FIBRA = {"DDR5-4800": "DDR5", "GDDR7-32": "GDDR7", "PCIe5": "PCIe", "PCIe4"
 R_FOLHA_1OZ_MOHM = 0.5 / 2          # dois planos de 1 oz em paralelo, como o modelo de energia usa
 
 # do conceito até o projeto atual: cada linha muda uma decisão
-CENARIOS = (   # nome, tradutores, chave da célula, cobre do plano (oz), placa fria (W/m²K; None = ar)
-    ("conceito: tradutor ao lado, célula com MOSFET", "ao_lado", "mosfet_potencia", 1, None),
-    ("tradutor sob a peça", "sob_peca", "mosfet_potencia", 1, None),
-    ("+ relé MEMS na célula", "sob_peca", "rele_mems", 1, None),
-    ("+ plano de energia com 2 oz", "sob_peca", "rele_mems", 2, None),
-    ("+ placa fria sob a base", "sob_peca", "rele_mems", 2, 1000),
+CENARIOS = (   # nome, tradutores, chave, cobre (oz), placa fria (W/m²K; None = ar), vias térmicas
+    ("conceito: tradutor ao lado, célula com MOSFET", "ao_lado", "mosfet_potencia", 1, None, 0.0),
+    ("tradutor sob a peça", "sob_peca", "mosfet_potencia", 1, None, 0.0),
+    ("+ relé MEMS na célula", "sob_peca", "rele_mems", 1, None, 0.0),
+    ("+ plano de energia com 2 oz", "sob_peca", "rele_mems", 2, None, 0.0),
+    ("+ placa fria sob a base", "sob_peca", "rele_mems", 2, 1000, 0.0),
+    ("+ vias térmicas até a placa", "sob_peca", "rele_mems", 2, 1000, 0.05),
 )
 
 
@@ -72,9 +73,10 @@ def _fontes_calor(nl):
     return out
 
 
-def _termico(m, cfg, nl, dist, placa_fria):
+def _termico(m, cfg, nl, dist, placa_fria, vias_termicas=0.0):
+    h = None if placa_fria is None else difusao.h_atraves_da_base(placa_fria, vias_termicas)
     return difusao.simular(m.base, cfg, m.zonas, perdas_contatos_w=dist["perdas_w"],
-                           fontes_extra=_fontes_calor(nl), h_inferior=placa_fria)
+                           fontes_extra=_fontes_calor(nl), h_inferior=h)
 
 
 def _contatos(m, cfg, nome_chave, cobre_oz):
@@ -222,10 +224,10 @@ def executar():
 
     # 11. conexões: a netlist do sistema inteiro, o verificador e o boot -------------
     R["conexoes"] = []
-    for nome, pos, ch, oz, placa in CENARIOS:
+    for nome, pos, ch, oz, placa, vias in CENARIOS:
         nl = construir(m, cfg, plano, viavel, posicionamento=pos, chave=ch)
         d = _contatos(m, cfg, ch, oz)
-        tc = _termico(m, cfg, nl, d, placa)
+        tc = _termico(m, cfg, nl, d, placa, vias)
         rel = verificar(nl, CX.montar(m, cfg, nl, tc, [d]))
         exemplos = {}
         for v in rel.erros:
@@ -236,10 +238,13 @@ def executar():
                               "erros": len(rel.erros), "exemplos": exemplos})
     nl = construir(m, cfg, plano, viavel, posicionamento=pj.get("tradutores", "sob_peca"),
                    chave=pj.get("chave_celula"))
-    term = _termico(m, cfg, nl, dist, pj.get("placa_fria_h_w_m2k"))
+    term = _termico(m, cfg, nl, dist, pj.get("placa_fria_h_w_m2k"), pj.get("vias_termicas_fracao", 0.0))
     R["termico"] = {"max_c": float(term.regime.max()), "amb_c": term.t_amb,
                     "calor_interconexao_w": sum(f[4] for f in _fontes_calor(nl)),
                     "placa_fria": pj.get("placa_fria_h_w_m2k"),
+                    "vias_termicas": pj.get("vias_termicas_fracao", 0.0),
+                    "h_efetivo": (difusao.h_atraves_da_base(pj["placa_fria_h_w_m2k"], pj.get("vias_termicas_fracao", 0.0))
+                                  if pj.get("placa_fria_h_w_m2k") else None),
                     "tradutores": {k: v["regime_c"] for k, v in term.tradutores.items()}}
     ctx = CX.montar(m, cfg, nl, term, [dist])
     rel = verificar(nl, ctx)
@@ -437,7 +442,9 @@ def _secao_conexoes(R):
           "perto do VRM e alguns passam de 1 A.",
           "- **Placa fria sob a base:** a interconexão dissipa dezenas de watts dentro da base; "
           "com o ar do gabinete, peças, células (relé até 85 °C) e anéis passam do limite, e o "
-          "aquecedor não cobre a variação de temperatura.", "",
+          "aquecedor não cobre a variação de temperatura.",
+          "- **Vias térmicas até a placa:** o LCP conduz mal (0,3 W/m·K); sem cobre atravessando "
+          "a base, a placa fria rende só ~230 W/m²K e ainda sobram peças quentes demais.", "",
           "Folga de cada número escolhido: [`sensibilidade.md`](sensibilidade.md). "
           "Contato imperfeito (peça inclinada, sujeira, pino torto): [`defeitos.md`](defeitos.md).", ""]
     if bt["ok"]:
@@ -524,8 +531,10 @@ def _relatorio(R):
           f"A interconexão dissipa **{tm['calor_interconexao_w']:.0f} W** dentro da própria base "
           f"(chips tradutores e lasers). Só com o ar do gabinete a base chegaria a "
           f"{sem_placa['base_max_c']:.0f} °C. Com a placa fria sob a base "
-          f"({tm['placa_fria']} W/m²K, líquido a {tm['amb_c']:.0f} °C), em carga máxima a base chega a "
-          f"**{tm['max_c']:.0f} °C**.", "",
+          f"({tm['placa_fria']} W/m²K, líquido a {tm['amb_c']:.0f} °C) e vias térmicas de cobre em "
+          f"{tm['vias_termicas']:.0%} da área atravessando o LCP (troca efetiva "
+          f"{tm['h_efetivo']:.0f} W/m²K), em carga máxima a base chega a **{tm['max_c']:.0f} °C**. "
+          f"Sem as vias, o LCP de 1 mm segura o calor e a placa fria sozinha não basta.", "",
           f"- Aquecedor dos anéis: o local mais exigente pede {aq['pede_max_nm']:.2f} nm de "
           f"sintonia; o aquecedor dá {aq['faixa_nm']:.2f} nm. {aq['sem_faixa']} chips sem faixa. "
           f"A frio, os aquecedores gastam {aq['frio_w']:.1f} W.",

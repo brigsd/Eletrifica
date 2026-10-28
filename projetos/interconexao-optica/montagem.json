@@ -26,6 +26,7 @@
     "tradutores": "sob_peca",
     "cobre_plano_oz": 2,
     "placa_fria_h_w_m2k": 1000,
+    "vias_termicas_fracao": 0.05,
     "config_optica": "viavel"
   },
   "zonas": {

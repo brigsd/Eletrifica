@@ -201,7 +201,9 @@ Resultados atuais (confira rodando, não confie nestes números):
   CXL (R18, aviso). A alternativa modelada é ReBAR pelo PCIe.
 - Conceito como estava: ~2.800 erros no verificador. Com as decisões de
   `montagem.json` (tradutor sob a peça, relé MEMS na célula, plano de 2 oz,
-  placa fria sob a base): 0 erros, e o boot emulado fica pronto em ~490 ms.
+  placa fria sob a base com vias térmicas em 5 % da área): 0 erros, e o boot
+  emulado fica pronto em ~490 ms. Placa fria e vias térmicas: aceitas pelo dono
+  (2026-10-28) desde que funcionem na prática; sem as vias, não fecham.
 - A interconexão dissipa ~88 W dentro da base; só com ar a base chega a
   ~200 °C. Com a placa fria, ~57 °C. Consumo ~97 W, ~6,5 pJ/bit.
 - 64 λ por fibra **não fecha** no modelo físico (diafonia); a configuração

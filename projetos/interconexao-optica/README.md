@@ -62,6 +62,7 @@ Ficam em `montagem.json`, chave `projeto`:
 | `chave_celula: rele_mems` | A mesma chave não serve para 1 A de energia e para 32 Gb/s: transistor com R_on baixo tem dezenas de pF desligado. Relé aberto é vão de ar (~20 fF); só comuta sem corrente, e as células são configuradas antes de energizar. |
 | `cobre_plano_oz: 2` | Com 1 oz, pinos de VCCIN perto do VRM passam de 1 A. |
 | `placa_fria_h_w_m2k: 1000` | A interconexão dissipa ~88 W dentro da base; só com ar ela chega a ~200 °C e peças, relés e anéis passam do limite. Com placa fria de líquido sob a base, ~57 °C. |
+| `vias_termicas_fracao: 0.05` | O LCP conduz mal: sem cobre atravessando a base, a placa fria rende ~230 W/m²K e a base passa de 95 °C. Com vias térmicas em 5 % da área, ~950 W/m²K e ~58 °C. |
 
 ## Fontes do projeto
 

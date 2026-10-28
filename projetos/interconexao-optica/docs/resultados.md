@@ -23,32 +23,32 @@ Conceito em [`conceito.md`](conceito.md). Visualizador 3D em [`../index.html`](.
 
 ## Temperatura da base
 
-A interconexão dissipa **88 W** dentro da própria base (chips tradutores e lasers). Só com o ar do gabinete a base chegaria a 199 °C. Com a placa fria sob a base (1000 W/m²K, líquido a 35 °C), em carga máxima a base chega a **57 °C**.
+A interconexão dissipa **88 W** dentro da própria base (chips tradutores e lasers). Só com o ar do gabinete a base chegaria a 199 °C. Com a placa fria sob a base (1000 W/m²K, líquido a 35 °C) e vias térmicas de cobre em 5% da área atravessando o LCP (troca efetiva 952 W/m²K), em carga máxima a base chega a **58 °C**. Sem as vias, o LCP de 1 mm segura o calor e a placa fria sozinha não basta.
 
-- Aquecedor dos anéis: o local mais exigente pede 3,01 nm de sintonia; o aquecedor dá 4,00 nm. 0 chips sem faixa. A frio, os aquecedores gastam 16,3 W.
-- Consumo da interconexão: **97 W**, 6,6 pJ/bit sobre 14,8 Tb/s; uma ligação elétrica inteira custa ~6,3 pJ/bit. Partes: tradutores 50,9 W, controle das células 0,0 W, lasers 29,6 W, aquecedores (pior caso) 16,3 W.
+- Aquecedor dos anéis: o local mais exigente pede 3,06 nm de sintonia; o aquecedor dá 4,00 nm. 0 chips sem faixa. A frio, os aquecedores gastam 16,6 W.
+- Consumo da interconexão: **97 W**, 6,6 pJ/bit sobre 14,8 Tb/s; uma ligação elétrica inteira custa ~6,3 pJ/bit. Partes: tradutores 50,9 W, controle das células 0,0 W, lasers 29,6 W, aquecedores (pior caso) 16,6 W.
 
 Nos tradutores ópticos:
 
 | Peça | °C |
 |---|---|
-| CPU | 42,0 |
+| CPU | 42,4 |
 | DIMM0 | 35,2 |
 | DIMM1 | 35,5 |
-| FPGA | 37,5 |
-| GPU | 47,6 |
-| MEM0 | 43,2 |
-| MEM1 | 46,7 |
-| MEM2 | 46,0 |
-| MEM3 | 42,6 |
-| MEM4 | 45,3 |
-| MEM5 | 43,0 |
-| MEM6 | 43,3 |
-| MEM7 | 44,5 |
-| MEM8 | 42,3 |
-| MEM9 | 42,7 |
-| MEM10 | 46,5 |
-| MEM11 | 45,3 |
+| FPGA | 37,6 |
+| GPU | 48,3 |
+| MEM0 | 43,7 |
+| MEM1 | 47,3 |
+| MEM2 | 46,5 |
+| MEM3 | 43,0 |
+| MEM4 | 45,8 |
+| MEM5 | 43,4 |
+| MEM6 | 43,7 |
+| MEM7 | 45,0 |
+| MEM8 | 42,7 |
+| MEM9 | 43,2 |
+| MEM10 | 47,0 |
+| MEM11 | 45,8 |
 | PCH | 36,6 |
 
 ## Etapa 4 — enlace óptico
@@ -93,13 +93,13 @@ Cada sinal é seguido salto a salto: pino → célula → trilha na base → chi
 
 Erros por regra, do conceito até o projeto atual:
 
-| Regra | conceito: tradutor ao lado, célula com MOSFET | tradutor sob a peça | + relé MEMS na célula | + plano de energia com 2 oz | + placa fria sob a base |
-|---|---|---|---|---|---|
-| banda | 2656 | 2518 | 0 | 0 | 0 |
-| energia | 1 | 1 | 1 | 0 | 0 |
-| tempo | 46 | 0 | 0 | 0 | 0 |
-| temperatura | 76 | 90 | 97 | 97 | 0 |
-| **total** | **2779** | **2609** | **98** | **97** | **0** |
+| Regra | conceito: tradutor ao lado, célula com MOSFET | tradutor sob a peça | + relé MEMS na célula | + plano de energia com 2 oz | + placa fria sob a base | + vias térmicas até a placa |
+|---|---|---|---|---|---|---|
+| banda | 2656 | 2518 | 0 | 0 | 0 | 0 |
+| energia | 1 | 1 | 1 | 0 | 0 | 0 |
+| tempo | 46 | 0 | 0 | 0 | 0 | 0 |
+| temperatura | 76 | 90 | 97 | 97 | 17 | 0 |
+| **total** | **2779** | **2609** | **98** | **97** | **17** | **0** |
 
 O que cada decisão resolveu:
 
@@ -112,6 +112,7 @@ O que cada decisão resolveu:
 - **Relé MEMS na célula:** a célula do conceito usa a mesma chave para 1 A de energia e para sinal de 32 Gb/s. Uma chave de transistor com R_on baixo o bastante para a energia tem dezenas de pF desligada, e isso derruba a banda de todo sinal rápido. Um relé, quando aberto, é um vão de ar: 20 fF. Ele só pode mudar de estado sem corrente, e a configuração das células acontece antes de energizar.
 - **Plano de energia com 2 oz:** com 1 oz a corrente se concentra nos pinos de VCCIN perto do VRM e alguns passam de 1 A.
 - **Placa fria sob a base:** a interconexão dissipa dezenas de watts dentro da base; com o ar do gabinete, peças, células (relé até 85 °C) e anéis passam do limite, e o aquecedor não cobre a variação de temperatura.
+- **Vias térmicas até a placa:** o LCP conduz mal (0,3 W/m·K); sem cobre atravessando a base, a placa fria rende só ~230 W/m²K e ainda sobram peças quentes demais.
 
 Folga de cada número escolhido: [`sensibilidade.md`](sensibilidade.md). Contato imperfeito (peça inclinada, sujeira, pino torto): [`defeitos.md`](defeitos.md).
 
