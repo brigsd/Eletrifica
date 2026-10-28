@@ -12,6 +12,7 @@ import math
 from dataclasses import dataclass
 
 from modulos.conexoes import construir as K
+from modulos.conexoes import contexto as CX
 from modulos.conexoes import verificador as V
 from modulos.energia import contatos
 from modulos.optica import enlace as E
@@ -69,6 +70,7 @@ class _Contexto:
         self.ch = chave_celula(CHAVE)
         self.contatos = self._contatos(self.ch.r_on_ohm)
         self.nl = self._netlist()
+        self.termico = self._termico(self.nl, self.contatos)
         self.base = self._contagem(V.verificar(self.nl, self._ctx()))
 
     def _contatos(self, r_on_ohm):
@@ -81,8 +83,16 @@ class _Contexto:
         return K.construir(self.m, self.cfg, self.plano, self.opt, chave=chave or self.ch,
                            posicionamento=POSICIONAMENTO, parametros=parametros)
 
-    def _ctx(self, contatos_=None, **extra):
-        return {"contatos": [contatos_ or self.contatos], **extra}
+    def _termico(self, nl, contatos_):
+        pj = self.m.projeto
+        return CX.simular_termico(self.m, self.cfg, nl, contatos_, pj.get("placa_fria_h_w_m2k"),
+                          pj.get("vias_termicas_fracao", 0.0))
+
+    def _ctx(self, nl=None, contatos_=None, **extra):
+        """Contexto completo do verificador; refaz a temperatura se a netlist ou os contatos mudaram."""
+        nl, ct = nl or self.nl, contatos_ or self.contatos
+        t = self.termico if (nl is self.nl and ct is self.contatos) else self._termico(nl, ct)
+        return CX.montar(self.m, self.cfg, nl, t, [ct], **extra)
 
     @staticmethod
     def _contagem(rel):
@@ -103,7 +113,7 @@ class _Contexto:
                 nl = self._netlist(parametros={nome: transforma(v)})
             except RuntimeError as e:          # não coube na base
                 return {f"construção: {e}"[:60]}
-            return self.novas(V.verificar(nl, self._ctx()))
+            return self.novas(V.verificar(nl, self._ctx(nl)))
         return avaliar
 
     def contexto(self, chave_ctx, padroes):
@@ -117,7 +127,7 @@ class _Contexto:
             ch = dataclasses.replace(self.ch, **{campo: v})
             nl = self._netlist(chave=ch)
             ct = self._contatos(ch.r_on_ohm) if campo == "r_on_ohm" else self.contatos
-            return self.novas(V.verificar(nl, self._ctx(ct)))
+            return self.novas(V.verificar(nl, self._ctx(nl, ct)))
         return avaliar
 
 

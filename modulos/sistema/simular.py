@@ -61,24 +61,6 @@ def _perturbacao(t_us, salto_k=10.0, tau_us=200.0, inicio_us=600.0):
     return 0.0 if t_us < inicio_us else salto_k * (1 - math.exp(-(t_us - inicio_us) / tau_us))
 
 
-def _fontes_calor(nl):
-    """Calor que a interconexão dissipa na própria base: chips tradutores e lasers."""
-    out = []
-    for c in nl.por_tipo("chip_tradutor"):
-        p = float(c.atributos.get("potencia_w", 0.0)) + sum(
-            float(f.atributos.get("potencia_w", 0.0) or 0.0) for f in nl.filhos(c.id))
-        out.append((c.posicao[0], c.posicao[1], c.atributos["largura_mm"], c.atributos["profundidade_mm"], p))
-    for l in nl.por_tipo("laser"):
-        out.append((l.posicao[0], l.posicao[1], 40.0, 25.0, float(l.atributos["potencia_eletrica_w"])))
-    return out
-
-
-def _termico(m, cfg, nl, dist, placa_fria, vias_termicas=0.0):
-    h = None if placa_fria is None else difusao.h_atraves_da_base(placa_fria, vias_termicas)
-    return difusao.simular(m.base, cfg, m.zonas, perdas_contatos_w=dist["perdas_w"],
-                           fontes_extra=_fontes_calor(nl), h_inferior=h)
-
-
 def _contatos(m, cfg, nome_chave, cobre_oz):
     d = contatos.distribuir(m.base, cfg, zona_vrm=m.zonas["vrm_cpu"],
                             r_on_mohm=chave_celula(nome_chave).r_on_ohm * 1e3,
@@ -231,7 +213,7 @@ def executar():
     for nome, pos, ch, oz, placa, vias in CENARIOS:
         nl = construir(m, cfg, plano, viavel, posicionamento=pos, chave=ch)
         d = _contatos(m, cfg, ch, oz)
-        tc = _termico(m, cfg, nl, d, placa, vias)
+        tc = CX.simular_termico(m, cfg, nl, d, placa, vias)
         rel = verificar(nl, CX.montar(m, cfg, nl, tc, [d]))
         exemplos = {}
         for v in rel.erros:
@@ -242,9 +224,9 @@ def executar():
                               "erros": len(rel.erros), "exemplos": exemplos})
     nl = construir(m, cfg, plano, viavel, posicionamento=pj.get("tradutores", "sob_peca"),
                    chave=pj.get("chave_celula"))
-    term = _termico(m, cfg, nl, dist, pj.get("placa_fria_h_w_m2k"), pj.get("vias_termicas_fracao", 0.0))
+    term = CX.simular_termico(m, cfg, nl, dist, pj.get("placa_fria_h_w_m2k"), pj.get("vias_termicas_fracao", 0.0))
     R["termico"] = {"max_c": float(term.regime.max()), "amb_c": term.t_amb,
-                    "calor_interconexao_w": sum(f[4] for f in _fontes_calor(nl)),
+                    "calor_interconexao_w": sum(f[4] for f in CX.fontes_calor(nl)),
                     "placa_fria": pj.get("placa_fria_h_w_m2k"),
                     "vias_termicas": pj.get("vias_termicas_fracao", 0.0),
                     "h_efetivo": (difusao.h_atraves_da_base(pj["placa_fria_h_w_m2k"], pj.get("vias_termicas_fracao", 0.0))

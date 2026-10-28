@@ -1,14 +1,36 @@
 """Monta o contexto que o verificador usa além da netlist: temperaturas, contatos, orçamentos.
 
-    ctx = montar(montagem, configuracao, netlist, termico, contatos=[dist])
+    t = simular_termico(montagem, configuracao, netlist, dist, placa_fria, vias_termicas)
+    ctx = montar(montagem, configuracao, netlist, t, contatos=[dist])
     verificar(netlist, ctx)
 """
 import math
 
 import numpy as np
 
+from modulos.termico import difusao
+
 TIPOS_COM_TEMPERATURA = ("chip_tradutor", "laser", "regulador", "celula")
 AMOSTRAS_POR_LADO = 5           # grade de amostras na área de cada peça
+
+
+def fontes_calor(netlist):
+    """Calor que a interconexão dissipa na própria base: chips tradutores e lasers."""
+    out = []
+    for c in netlist.por_tipo("chip_tradutor"):
+        p = float(c.atributos.get("potencia_w", 0.0)) + sum(
+            float(f.atributos.get("potencia_w", 0.0) or 0.0) for f in netlist.filhos(c.id))
+        out.append((c.posicao[0], c.posicao[1], c.atributos["largura_mm"], c.atributos["profundidade_mm"], p))
+    for l in netlist.por_tipo("laser"):
+        out.append((l.posicao[0], l.posicao[1], 40.0, 25.0, float(l.atributos["potencia_eletrica_w"])))
+    return out
+
+
+def simular_termico(montagem, configuracao, netlist, dist, placa_fria, vias_termicas=0.0):
+    """Temperatura da base em regime: perdas nos contatos mais o calor da interconexão."""
+    h = None if placa_fria is None else difusao.h_atraves_da_base(placa_fria, vias_termicas)
+    return difusao.simular(montagem.base, configuracao, montagem.zonas, perdas_contatos_w=dist["perdas_w"],
+                           fontes_extra=fontes_calor(netlist), h_inferior=h)
 
 
 def _temperatura_peca(termico, pc):
