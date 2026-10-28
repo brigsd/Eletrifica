@@ -14,7 +14,7 @@ PECA_C = {                      # temperatura máxima no local da peça
 PECA_PADRAO_C = 85.0
 
 ELASTOMERO_SILICONE_C = 150.0   # elastômero condutivo anisotrópico
-LCP_BASE_C = 200.0              # uso contínuo do polímero de cristal líquido
+LCP_BASE_C = 125.0              # multicamada de LCP estável até ~125 °C (docs/viabilidade.md)
 CHIP_TRADUTOR_C = 100.0         # fotônica de silício com driver CMOS no mesmo chip
 LASER_SEM_TEC_C = 70.0          # DFB não refrigerado
 LASER_COM_TEC_C = 75.0          # carcaça de módulo com TEC

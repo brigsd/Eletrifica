@@ -52,6 +52,14 @@ Os achados principais:
     suportam CXL. Pelo PCIe com ReBAR, a CPU lê a GDDR7 a ~55 GB/s e ~800 ns,
     contra ~65 GB/s e ~90 ns da DDR5 local.
 
+## Funciona na prática?
+
+O simulador prova coerência com as premissas; [`docs/viabilidade.md`](docs/viabilidade.md)
+confere cada premissa contra o que existe hoje, com fontes. A física fecha, mas três
+coisas não existem: a **célula chaveada** (1 A e ~20 fF num passo de 0,4 mm), **DDR5 e
+GDDR7 por óptica linear** (a indústria termina o protocolo de memória) e o **acesso à
+plataforma Intel** fora de parceiros OEM. PCIe por óptica, placa fria e lasers são maduros.
+
 ## Decisões de projeto que o verificador exigiu
 
 Ficam em `montagem.json`, chave `projeto`:

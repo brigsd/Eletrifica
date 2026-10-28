@@ -98,8 +98,8 @@ Erros por regra, do conceito até o projeto atual:
 | banda | 2656 | 2518 | 0 | 0 | 0 | 0 |
 | energia | 1 | 1 | 1 | 0 | 0 | 0 |
 | tempo | 46 | 0 | 0 | 0 | 0 | 0 |
-| temperatura | 76 | 90 | 97 | 97 | 17 | 0 |
-| **total** | **2779** | **2609** | **98** | **97** | **17** | **0** |
+| temperatura | 77 | 91 | 98 | 98 | 17 | 0 |
+| **total** | **2780** | **2610** | **99** | **98** | **17** | **0** |
 
 O que cada decisão resolveu:
 

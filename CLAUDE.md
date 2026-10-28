@@ -191,6 +191,12 @@ Regras do modelo:
   `python3 -m modulos.conexoes.sensibilidade` (docs/sensibilidade.md, ~3 min) e
   `python3 -m modulos.sistema.levantamento_defeitos` (docs/defeitos.md, ~2 min).
 
+**Viabilidade prática:** `projetos/interconexao-optica/docs/viabilidade.md`
+(pesquisa com fontes, 2026-10-28). Os três bloqueios reais: a célula chaveada
+(relé de 1 A e ~20 fF a 0,4 mm não existe), DDR5/GDDR7 por óptica linear (sem
+evidência) e o acesso à plataforma Intel (restrito a OEMs). Ao mudar uma
+premissa física do modelo, confira nesse documento se o valor é realista.
+
 Resultados atuais (confira rodando, não confie nestes números):
 
 - 18/18 peças identificadas, erro de µm, em qualquer giro (o ângulo sai do
