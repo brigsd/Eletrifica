@@ -41,6 +41,7 @@ arquivo junto** — é ele que segura o contexto entre sessões e entre agentes.
 | Nome antigo | `brigsd/Achievements` — **renomeado, não use mais** |
 | Site | <https://brigsd.github.io/Eletrifica/> (página inicial) |
 | GitHub Pages | branch `main`, pasta `/ (root)`, com `.nojekyll` |
+| Conta do GitHub nas sessões | **`warbookbr`** (colaborador com Write). Push com 403: confira `gh api repos/brigsd/Eletrifica --jq .permissions.push` antes de mexer em token ou app |
 
 > **Atenção:** a pasta local do checkout ainda pode se chamar `Achievements`, e
 > conversas antigas ainda citam esse nome. Isso é só resíduo. O repositório é
