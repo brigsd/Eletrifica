@@ -49,6 +49,7 @@ class Componente:
     potencia_max: float      # W
     fracao_calor_base: float  # parte do calor que vai para a base, o resto vai ao dissipador
     cor: str
+    cxl: bool = False         # hospeda memória compartilhada por CXL (CXL.mem/CXL.cache)
 
     def pino(self, nome):
         return self._indice()[nome]
@@ -173,10 +174,14 @@ def i5_13600kf():
         interfaces={"DDR5_A": Interface("DDR5_A", "DDR5-4800", "DDR5-DIMM", sinais("DDR5_A")),
                     "DDR5_B": Interface("DDR5_B", "DDR5-4800", "DDR5-DIMM", sinais("DDR5_B")),
                     "PEG": Interface("PEG", "PCIe5", "GPU", sinais("PEG")),
-                    "PCH": Interface("PCH", "PCIe4", "FPGA", sinais("PCH")),
-                    "AUX": Interface("AUX", "AUX", "FPGA", sinais("AUX"))},
+                    # DMI 4.0 x8 até o chipset; PCIe 4.0 x4 é uma porta raiz da própria CPU
+                    "DMI": Interface("DMI", "PCIe4", "PCH",
+                                     [n for n in sinais("PCH") if n.startswith("DMI")]),
+                    "PCIE4": Interface("PCIE4", "PCIe4", "FPGA",
+                                       [n for n in sinais("PCH") if not n.startswith("DMI")]),
+                    "AUX": Interface("AUX", "AUX", "PCH", sinais("AUX"))},
         potencia_tipica=125.0, potencia_max=181.0, fracao_calor_base=0.06,
-        cor="#9aa4ad")
+        cor="#9aa4ad", cxl=False)
 
 
 def ddr5_dimm():
@@ -250,7 +255,7 @@ def gpu():
         interfaces={"GDDR7": Interface("GDDR7", "GDDR7-32", "GDDR7", sinais("GDDR7")),
                     "PEG": Interface("PEG", "PCIe5", "i5-13600KF", sinais("PEG"))},
         potencia_tipica=220.0, potencia_max=300.0, fracao_calor_base=0.04,
-        cor="#3d3f45")
+        cor="#3d3f45", cxl=False)
 
 
 def gddr7():
@@ -289,9 +294,9 @@ def gddr7():
 
 
 def _sinais_transceptores():
-    """Lado do FPGA do DMI x8 e do PCIe 4.0 x4 da CPU: o TX de um é o RX do outro."""
-    return ([f"PCIE4_{d}{i}" for i in range(4) for d in ("TX", "RX")]
-            + [f"DMI_{i}" for i in range(16)] + ["REFCLK_XCVR"])
+    """O FPGA é um dispositivo PCIe 4.0 x4 na porta raiz da CPU (controle e telemetria da base).
+    O TX de um lado é o RX do outro. O DMI não vem para cá: ele é do chipset."""
+    return [f"PCIE4_{d}{i}" for i in range(4) for d in ("TX", "RX")] + ["REFCLK_XCVR"]
 
 
 def fpga():
@@ -346,7 +351,62 @@ def fpga():
         cor="#6b4f9e")
 
 
-CATALOGO = {f().tipo: f for f in (i5_13600kf, ddr5_dimm, gpu, gddr7, fpga)}
+# sinais do chipset, por interface (o lado da CPU tem os mesmos nomes, salvo RSMRST/SLP_S3)
+PCH_SINAIS = {
+    "DMI": [f"DMI_{i}" for i in range(16)],
+    "AUXCPU": ["PWROK", "PLTRST", "RSMRST_CPU", "SLP_S3_CPU", "THERMTRIP", "CATERR", "PROCHOT",
+               "PECI", "SMBUS_CLK", "SMBUS_DATA"],
+    "SPD": ["SPD0_HSCL", "SPD0_HSDA", "SPD1_HSCL", "SPD1_HSDA"],
+    "CLK": ["CLKOUT_BCLK", "CLKOUT_PEG_CPU", "CLKOUT_PEG_GPU", "CLKOUT_PCIE4_CPU", "CLKOUT_XCVR"],
+    "PM": ["RSMRST_IN", "SYS_PWROK", "SLP_S3_OUT", "SMB_FPGA_CLK", "SMB_FPGA_DATA"],
+    "SPI": ["SPI_CLK", "SPI_CS0", "SPI_MOSI", "SPI_MISO"],
+}
+PCH_PROTOCOLO = {"DMI": "PCIe4", "AUXCPU": "AUX", "SPD": "DDR5-4800", "CLK": "AUX", "PM": "AUX",
+                 "SPI": "AUX"}
+PCH_PAR = {"DMI": "i5-13600KF", "AUXCPU": "i5-13600KF", "SPD": "DDR5-DIMM", "CLK": "i5-13600KF",
+           "PM": "FPGA", "SPI": "flash"}
+
+
+def pch():
+    """Chipset Intel série 700 (B760), FCBGA a 0,8 mm: DMI 4.0 x8, SPI, I3C do SPD, relógios,
+    gerência de energia e o ME. Só a camada de baixo de bolas é modelada."""
+    nx, ny, passo = 30, 29, 0.8
+    nome = _Contador()
+    sinais = iter([(g, s) for g, lista in PCH_SINAIS.items() for s in lista])
+    pinos = []
+    for ix, iy, x, y in _grade(nx, ny, passo):
+        borda = min(ix, iy, nx - 1 - ix, ny - 1 - iy)
+        xadrez = (ix + iy) % 2 == 0
+        if borda <= 2:                                 # anel externo: sinais, blindados por VSS
+            if (ix + iy) % 3 == 0:
+                pinos.append(Pino(nome("VSS"), TERRA, "VSS", x, y))
+                continue
+            gs = next(sinais, None)
+            if gs:
+                pinos.append(Pino(gs[1], SINAL, gs[0], x, y))
+            else:
+                pinos.append(Pino(nome("VSS"), TERRA, "VSS", x, y))
+        elif borda <= 5:                               # poço de standby (Sx): sempre ligado
+            pinos.append(Pino(nome("VCCSTBY"), ENERGIA, "VCCSTBY", x, y) if xadrez
+                         else Pino(nome("VSS"), TERRA, "VSS", x, y))
+        elif 12 <= ix <= 17 and 12 <= iy <= 16:
+            continue                                   # vão central sem bolas
+        else:                                          # núcleo: poço principal (S0)
+            pinos.append(Pino(nome("VCCPRIM"), ENERGIA, "VCCPRIM", x, y) if xadrez
+                         else Pino(nome("VSS"), TERRA, "VSS", x, y))
+    return Componente(
+        tipo="PCH", nome="Intel B760 (chipset série 700)",
+        largura=25.0, profundidade=24.0, altura=1.8, diametro_pad=0.45,
+        pinos=pinos,
+        trilhos={"VCCSTBY": Trilho("VCCSTBY", 1.05, 2.0, "base"),
+                 "VCCPRIM": Trilho("VCCPRIM", 1.05, 6.0, "base")},
+        interfaces={g: Interface(g, PCH_PROTOCOLO[g], PCH_PAR[g], list(lista))
+                    for g, lista in PCH_SINAIS.items()},
+        potencia_tipica=6.0, potencia_max=8.0, fracao_calor_base=0.3,
+        cor="#5a7d9a")
+
+
+CATALOGO = {f().tipo: f for f in (i5_13600kf, ddr5_dimm, gpu, gddr7, fpga, pch)}
 
 _cache = {}
 

@@ -55,7 +55,7 @@ modulos/      ferramentas por objetivo; cada pasta é um módulo Python
   pcb/          engenharia reversa de PCB a partir do Gerber
   componentes/  modelos das peças do projeto óptico
   sistema/      base de células, chave da célula, sondagem, identificação, boot, simulação
-  conexoes/     netlist do sistema inteiro + verificador (17 regras) + sensibilidade
+  conexoes/     netlist do sistema inteiro + verificador (18 regras) + sensibilidade
   energia/ termico/ optica/ dados/   simuladores
   visual/       cena 3D e gráficos SVG
 projetos/     um diretório por projeto (dados de origem + saídas geradas + visualizador)
@@ -145,7 +145,8 @@ Dependências em `requirements.txt`, mais o `kicad-cli` do KiCad 7+.
 ## Projeto `interconexao-optica`
 
 Emulador de uma base modular que substitui a placa-mãe: CPU i5-13600KF, 2 DDR5,
-GPU com 12 chips GDDR7 e um FPGA encaixados em qualquer posição sobre células
+GPU com 12 chips GDDR7, um chipset Intel B760 (PCH) e um FPGA, 18 peças
+encaixadas em qualquer posição e giro sobre células
 chaveadas; dados por fibra óptica. O conceito do dono está em
 `projetos/interconexao-optica/docs/conceito.md` (cópia do documento
 <https://claude.ai/artifact/3NMHV7qQad9bxKu82cApAJ>).
@@ -170,7 +171,7 @@ Regras do modelo:
 - **Nada é conectado por mágica.** `modulos/conexoes/construir.py` monta a
   netlist com cada salto de cada sinal (célula, trilha, chip tradutor, laser,
   fibra, receptor, driver), mais energia, controle e relógio de cada bloco.
-  `verificador.py` confere 17 regras (R13 temperatura e R14 consumo usam o
+  `verificador.py` confere 18 regras (R13 temperatura e R14 consumo usam o
   contexto de `contexto.py`, montado da simulação térmica e de energia);
   `modulos/sistema/boot.py` liga o sistema
   como máquina de estados sobre essa netlist. Um módulo novo que crie
@@ -192,7 +193,12 @@ Regras do modelo:
 
 Resultados atuais (confira rodando, não confie nestes números):
 
-- 17/17 peças identificadas, erro de µm.
+- 18/18 peças identificadas, erro de µm, em qualquer giro (o ângulo sai do
+  retângulo de área mínima das células em contato).
+- O PCH é peça própria: gera os relógios, sequencia a energia, lê o ME e a BIOS
+  da flash. O FPGA só orquestra a base (células, tradutores, lasers).
+- Memória compartilhada via CXL **não** fecha: nem a CPU nem a GPU suportam
+  CXL (R18, aviso). A alternativa modelada é ReBAR pelo PCIe.
 - Conceito como estava: ~2.800 erros no verificador. Com as decisões de
   `montagem.json` (tradutor sob a peça, relé MEMS na célula, plano de 2 oz,
   placa fria sob a base): 0 erros, e o boot emulado fica pronto em ~490 ms.

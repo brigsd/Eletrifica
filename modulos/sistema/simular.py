@@ -18,6 +18,7 @@ from modulos.conexoes.verificador import REGRAS, aquecedores, consumo, verificar
 from modulos.dados import comandos as CMD
 from modulos.dados import ddr5 as DDR
 from modulos.dados import emulador as DE
+from modulos.dados import memoria_compartilhada as MC
 from modulos.dados import pcie as PCIE
 from modulos.dados import latencia as DL
 from modulos.dados import roteamento as DR
@@ -259,7 +260,8 @@ def executar():
                           for p in ("DDR5-4800", "GDDR7-32")},
         "ddr5_espelhando": DDR.resumo(DDR.simular(espelhar=True)),
         "ddr5_sem_espelho": DDR.resumo(DDR.simular(espelhar=False)),
-        "pcie": PCIE.avaliar_netlist(nl)}
+        "pcie": PCIE.avaliar_netlist(nl),
+        "memoria": MC.comparar(nl)}
     R["boot"] = {"ok": ex.ok, "parou_em": ex.parou_em, "tempos_ms": {k: v / 1e3 for k, v in ex.tempos.items()}}
 
     # cena 3D ---------------------------------------------------------------------
@@ -400,7 +402,7 @@ NOME_REGRA = {"R01-caminho": "caminho", "R02-sentido": "sentido", "R03-padrao": 
               "R10-relogio": "relógio", "R11-requisito": "requisito", "R12-orfao": "órfão",
               "R13-temperatura": "temperatura", "R14-consumo": "consumo",
               "R15-decodificacao": "decodificação", "R16-ajuste": "ajuste elétrico",
-              "R17-pcie": "PCIe"}
+              "R17-pcie": "PCIe", "R18-memoria-compartilhada": "memória compartilhada"}
 
 
 def _secao_conexoes(R):
@@ -468,6 +470,16 @@ def _secao_conexoes(R):
           f"olho com {pc['olho']['altura_rel']:.2f} de altura e {pc['olho']['largura_ui']:.2f} UI de "
           f"largura; com um tradutor idealmente linear seria {pc['olho_linear']['altura_rel']:.2f} e "
           f"{pc['olho_linear']['largura_ui']:.2f} UI — a não linearidade do anel quase não pesa em NRZ.", ""]
+    mem = pr["memoria"]
+    L += ["### Memória compartilhada", "",
+          "O conceito pede memória compartilhada mediada pelo FPGA via CXL. Nem a i5-13600KF nem a GPU "
+          "suportam CXL, então isso não fecha com estas peças (aviso da regra R18). O que funciona hoje "
+          "é a CPU enxergar a GDDR7 pelo PCIe com BAR redimensionável:", "",
+          "| Opção | Banda | Latência | Coerente |", "|---|---|---|---|"]
+    for x in mem.values():
+        nota = "" if x["nesta_montagem"] else " (não dá nesta montagem)"
+        L.append(f"| {x['nome']}{nota} | {x['banda_gb_s']:.0f} GB/s | {x['latencia_ns']:.0f} ns | "
+                 f"{'sim' if x['coerente'] else 'não'} |")
     return L + [""]
 
 
@@ -485,7 +497,7 @@ def _relatorio(R):
           f"terra/energia/sinal. Erro máximo de posição {mp['erro_max_mm'] * 1000:.1f} µm e "
           f"{mp['erro_max_graus']:.2f}°.",
           f"- Energizar antes da identificação é recusado: “{mp['recusa_sem_identificacao'][1]}”.",
-          "- Trocar peças de lugar e girar a CPU 91° continua identificando certo "
+          "- Trocar peças de lugar e girar qualquer peça em qualquer ângulo (37°, 63,5°, 133°, 301°) continua identificando certo "
           "(`tests/test_sistema.py`).", ""]
 
     a, ct, v, k = R["arvore"], R["contatos"], R["vrm"], R["curto"]

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 from scipy.optimize import minimize
-from scipy.spatial import cKDTree
+from scipy.spatial import ConvexHull, cKDTree
 
 from modulos.componentes import CATALOGO, ENERGIA, SINAL, TERRA, obter
 from modulos.sistema.base import CODIGO, F_ENERGIA, F_SINAL, F_TERRA
@@ -239,6 +239,26 @@ def _reconhecer_tudo(base, xy, cls, celulas):
     return out
 
 
+def _angulo_retangulo(xy):
+    """Ângulo (mod 90°) do retângulo de área mínima que envolve as células: a orientação
+    da peça, em qualquer giro."""
+    try:
+        h = xy[ConvexHull(xy).vertices]
+    except Exception:
+        return 0.0
+    melhor = (math.inf, 0.0)
+    for a, b in zip(h, np.roll(h, -1, axis=0)):
+        ang = math.atan2(b[1] - a[1], b[0] - a[0])
+        c, s = math.cos(-ang), math.sin(-ang)
+        u = c * h[:, 0] - s * h[:, 1]
+        v = s * h[:, 0] + c * h[:, 1]
+        area = (u.max() - u.min()) * (v.max() - v.min())
+        if area < melhor[0] - 1e-9:
+            melhor = (area, math.degrees(ang) % 90.0)
+    th = melhor[1]
+    return th - 90.0 if th > 45.0 else th
+
+
 def _reconhecer(base, xy, cls, celulas):
     area_contato = lambda peca: math.pi * (peca.diametro_pad / 2 + base.raio_contato) ** 2
     hipoteses = []
@@ -249,7 +269,8 @@ def _reconhecer(base, xy, cls, celulas):
             continue
         alcance = peca.diametro_pad / 2 + base.raio_contato
         pins0 = np.array([(q.x, q.y) for q in peca.pinos])
-        for rot0 in (0.0, 90.0, 180.0, 270.0):
+        theta = _angulo_retangulo(xy)
+        for rot0 in (theta, theta + 90.0, theta + 180.0, theta + 270.0):
             c, s = math.cos(math.radians(rot0)), math.sin(math.radians(rot0))
             rp = np.column_stack([c * pins0[:, 0] - s * pins0[:, 1], s * pins0[:, 0] + c * pins0[:, 1]])
             # centro do retângulo envolvente: não se move quando falta um canto

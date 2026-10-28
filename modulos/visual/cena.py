@@ -30,9 +30,12 @@ DESCRICAO = {
            "de GDDR7 até os chips de memória.",
     "GDDR7": "Chip de memória de vídeo, 32 bits a 32 Gb/s por pino em PAM3. Cada pino de "
              "dados ganha seu próprio canal óptico até a GPU.",
-    "FPGA": "Orquestrador. Sonda as células, identifica as peças, configura cada célula, "
-            "entrega firmware UEFI, relógios, sequência de energização e as funções de "
-            "chipset que a CPU exige para ligar.",
+    "FPGA": "Orquestrador da base. Sonda as células, identifica as peças, configura cada "
+            "célula e os chips tradutores, liga os reguladores e conversa com o PCH por "
+            "RSMRST#, SLP_S3#, SYS_PWROK e SMBus.",
+    "PCH": "Chipset Intel série 700. Recebe a CPU pela DMI 4.0 x8, lê o descritor, o ME e a "
+           "BIOS da flash pela SPI, gera o BCLK e os relógios PCIe, lê o SPD das DDR5 por "
+           "I3C e solta PROCPWRGD e PLTRST# para a CPU.",
 }
 
 

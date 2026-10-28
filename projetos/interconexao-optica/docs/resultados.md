@@ -6,14 +6,14 @@ Conceito em [`conceito.md`](conceito.md). Visualizador 3D em [`../index.html`](.
 
 ## Etapa 1 e 2 — acoplamento e mapeamento
 
-- 21717 células em contato, 0 em ponte, sondadas em 43 ms.
-- **17 de 17 peças identificadas** só pelo padrão terra/energia/sinal. Erro máximo de posição 2,2 µm e 0,13°.
+- 23717 células em contato, 0 em ponte, sondadas em 47 ms.
+- **18 de 18 peças identificadas** só pelo padrão terra/energia/sinal. Erro máximo de posição 2,2 µm e 0,13°.
 - Energizar antes da identificação é recusado: “nenhuma peça identificada ainda”.
-- Trocar peças de lugar e girar a CPU 91° continua identificando certo (`tests/test_sistema.py`).
+- Trocar peças de lugar e girar qualquer peça em qualquer ângulo (37°, 63,5°, 133°, 301°) continua identificando certo (`tests/test_sistema.py`).
 
 ## Etapa 3 — energia
 
-- Fonte de 12 V: 641 W (53,4 A); 318 W passam pela base, 323 W pelo cabo da GPU.
+- Fonte de 12 V: 651 W (54,2 A); 327 W passam pela base, 323 W pelo cabo da GPU.
 - VCCIN a 200 A em 376 pinos e 976 células: média 0,53 A por pino, máximo **0,88 A**; **0 pinos passam de 1 A**. Célula mais carregada: 0,38 A.
 - Queda IR na base 22,3 mV, perdas 4,5 W.
 - VRM, degrau 30 → 180 A: queda total 170 mV (reta de carga), assenta em 9,8 µs, desbalanço entre fases 9,1 %, eficiência 92,4 %.
@@ -25,8 +25,8 @@ Conceito em [`conceito.md`](conceito.md). Visualizador 3D em [`../index.html`](.
 
 A interconexão dissipa **88 W** dentro da própria base (chips tradutores e lasers). Só com o ar do gabinete a base chegaria a 199 °C. Com a placa fria sob a base (1000 W/m²K, líquido a 35 °C), em carga máxima a base chega a **57 °C**.
 
-- Aquecedor dos anéis: o local mais exigente pede 3,01 nm de sintonia; o aquecedor dá 4,00 nm. 0 chips sem faixa. A frio, os aquecedores gastam 16,4 W.
-- Consumo da interconexão: **97 W**, 6,5 pJ/bit sobre 14,8 Tb/s; uma ligação elétrica inteira custa ~6,3 pJ/bit. Partes: tradutores 50,7 W, controle das células 0,0 W, lasers 29,6 W, aquecedores (pior caso) 16,4 W.
+- Aquecedor dos anéis: o local mais exigente pede 3,01 nm de sintonia; o aquecedor dá 4,00 nm. 0 chips sem faixa. A frio, os aquecedores gastam 16,3 W.
+- Consumo da interconexão: **97 W**, 6,6 pJ/bit sobre 14,8 Tb/s; uma ligação elétrica inteira custa ~6,3 pJ/bit. Partes: tradutores 50,9 W, controle das células 0,0 W, lasers 29,6 W, aquecedores (pior caso) 16,3 W.
 
 Nos tradutores ópticos:
 
@@ -49,6 +49,7 @@ Nos tradutores ópticos:
 | MEM9 | 42,7 |
 | MEM10 | 46,5 |
 | MEM11 | 45,3 |
+| PCH | 36,6 |
 
 ## Etapa 4 — enlace óptico
 
@@ -88,24 +89,24 @@ Canais simulados no tempo (configuração viável):
 
 ## Conexões — a netlist do sistema inteiro
 
-Cada sinal é seguido salto a salto: pino → célula → trilha na base → chip tradutor → modulador → fibra → filtro → receptor → driver de saída → trilha → célula → pino, com laser, alimentação, controle e relógio de cada bloco ativo. São 8807 blocos, 19121 ligações e 764 sinais. O verificador (`modulos/conexoes/verificador.py`) confere 12 regras.
+Cada sinal é seguido salto a salto: pino → célula → trilha na base → chip tradutor → modulador → fibra → filtro → receptor → driver de saída → trilha → célula → pino, com laser, alimentação, controle e relógio de cada bloco ativo. São 8871 blocos, 19184 ligações e 773 sinais. O verificador (`modulos/conexoes/verificador.py`) confere 12 regras.
 
 Erros por regra, do conceito até o projeto atual:
 
 | Regra | conceito: tradutor ao lado, célula com MOSFET | tradutor sob a peça | + relé MEMS na célula | + plano de energia com 2 oz | + placa fria sob a base |
 |---|---|---|---|---|---|
-| banda | 2658 | 2520 | 0 | 0 | 0 |
+| banda | 2656 | 2518 | 0 | 0 | 0 |
 | energia | 1 | 1 | 1 | 0 | 0 |
 | tempo | 46 | 0 | 0 | 0 | 0 |
-| temperatura | 75 | 89 | 96 | 96 | 0 |
-| **total** | **2780** | **2610** | **97** | **96** | **0** |
+| temperatura | 76 | 90 | 97 | 97 | 0 |
+| **total** | **2779** | **2609** | **98** | **97** | **0** |
 
 O que cada decisão resolveu:
 
 - **banda** (conceito): cel:CPU:DDR5_A_A_DQ0: banda 0,1 GHz < 2,4 GHz de DDR5-DQ
 - **energia** (conceito): CPU:VCCIN: 21 pinos acima de 1 A (máx. 1,21 A)
-- **tempo** (conceito): GPU.G8_DQ16->MEM3.GX_DQ16 (ida): 1120 ps > 1000 ps
-- **temperatura** (conceito): peça MEM5 (GDDR7): 124,4 °C > 105 °C
+- **tempo** (conceito): GPU.G8_DQ16->MEM3.GX_DQ16 (ida): 1030 ps > 1000 ps
+- **temperatura** (conceito): peça MEM7 (GDDR7): 128,5 °C > 105 °C
 
 - **Tradutor sob a peça:** com o chip ao lado, trilhas de até 120 mm na base estouram o atraso e o desalinhamento da GDDR7; numa camada de fotônica debaixo da peça, cada pino desce poucos milímetros até o seu chip.
 - **Relé MEMS na célula:** a célula do conceito usa a mesma chave para 1 A de energia e para sinal de 32 Gb/s. Uma chave de transistor com R_on baixo o bastante para a energia tem dezenas de pF desligada, e isso derruba a banda de todo sinal rápido. Um relé, quando aberto, é um vão de ar: 20 fF. Ele só pode mudar de estado sem corrente, e a configuração das células acontece antes de energizar.
@@ -114,31 +115,42 @@ O que cada decisão resolveu:
 
 Folga de cada número escolhido: [`sensibilidade.md`](sensibilidade.md). Contato imperfeito (peça inclinada, sujeira, pino torto): [`defeitos.md`](defeitos.md).
 
-### Boot emulado na netlist: pronto em 486 ms
+### Boot emulado na netlist: pronto em 490 ms
 
 Máquina de estados com guarda em cada transição (`modulos/sistema/boot.py`):
 
 | Etapa | Concluída em |
 |---|---|
 | Sondagem | 0,00 ms |
-| Identificação | 43,43 ms |
-| Configuração | 46,43 ms |
-| Fonte e standby | 147,43 ms |
-| Trilhos principais | 198,53 ms |
-| Tradutores e lasers | 199,03 ms |
-| Anéis travados | 199,23 ms |
-| Núcleo da CPU | 199,80 ms |
-| Relógio e reset | 200,80 ms |
-| Treino da memória | 400,80 ms |
-| PCIe e GDDR7 | 486,13 ms |
-| Pronto | 486,13 ms |
+| Identificação | 47,43 ms |
+| Configuração | 50,43 ms |
+| Fonte e standby | 151,43 ms |
+| ME do chipset | 181,53 ms |
+| Trilhos principais | 182,63 ms |
+| Tradutores e lasers | 183,13 ms |
+| Anéis travados | 183,33 ms |
+| Núcleo da CPU | 184,00 ms |
+| Relógio e reset | 185,00 ms |
+| BIOS pela DMI | 205,00 ms |
+| Treino da memória | 405,00 ms |
+| PCIe e GDDR7 | 490,33 ms |
+| Pronto | 490,33 ms |
 
 ### O que o tradutor faz além de copiar
 
 - **Decodificação parcial.** Os dados são copiados sem decodificar. O comando, não: para saber o sentido dos pinos bidirecionais e acompanhar os ajustes elétricos, o tradutor decodifica MRR, RD, WR, MRW:5,32,33,34,35 na DDR5 e RD, RDTR, WR, WRTR, MRS:3,7,8 na GDDR7, e copia sem ler o resto (ACT, NOP, PREab, PREpb, REFab, VREFCA). Leva 1,3 ns na DDR5 contra 15 ns até o primeiro dado, e 1,2 ns na GDDR7 contra 9 ns.
 - **Ajustes dinâmicos da DDR5.** A CPU muda terminação e força de saída por MRW durante o uso. O tradutor de cada ponta espelha esses valores: com espelho, 0 de 10 comandos divergem; sem espelho, 8 de 10 (pior caso: programado 240 Ω, visto 40 Ω, -369 mV de amplitude).
-- **PCIe 5.** A detecção de receptor é controlada pelo FPGA (o tradutor só apresenta terminação com a GPU identificada e a luz travada) e o ocioso elétrico atravessa a luz. A equalização escolhe o preset P5 com CTLE de 4 dB: olho com 0,89 de altura e 0,81 UI de largura; com um tradutor idealmente linear seria 0,89 e 0,81 UI — a não linearidade do anel quase não pesa em NRZ.
+- **PCIe 5.** A detecção de receptor é controlada pelo FPGA (o tradutor só apresenta terminação com a GPU identificada e a luz travada) e o ocioso elétrico atravessa a luz. A equalização escolhe o preset P8 com CTLE de 2 dB: olho com 0,83 de altura e 0,84 UI de largura; com um tradutor idealmente linear seria 0,82 e 0,84 UI — a não linearidade do anel quase não pesa em NRZ.
 
+### Memória compartilhada
+
+O conceito pede memória compartilhada mediada pelo FPGA via CXL. Nem a i5-13600KF nem a GPU suportam CXL, então isso não fecha com estas peças (aviso da regra R18). O que funciona hoje é a CPU enxergar a GDDR7 pelo PCIe com BAR redimensionável:
+
+| Opção | Banda | Latência | Coerente |
+|---|---|---|---|
+| GPU vista pela CPU (ReBAR, PCIe 5 x16) | 55 GB/s | 801 ns | não |
+| DDR5 local (2 canais DDR5-4800) | 65 GB/s | 93 ns | sim |
+| Unificada no encapsulamento (LPDDR5X-8533, 128 bits) (não dá nesta montagem) | 116 GB/s | 110 ns | sim |
 
 ## Etapa 5 — dados
 
@@ -150,7 +162,8 @@ Máquina de estados com guarda em cada transição (`modulos/sistema/boot.py`):
 | CPU-DIMM1 | 654 ps | 952 ps | 408 ps |
 | GPU-MEM7 | 226 ps | 340 ps | 102 ps |
 | CPU-GPU | 337 ps | 544 ps | 1020 ps |
-| CPU-FPGA | 511 ps | 952 ps | 816 ps |
+| CPU-PCH | 529 ps | 714 ps | 816 ps |
+| CPU-FPGA | 1022 ps | 952 ps | 816 ps |
 
 - Treino DDR5: DIMM0 converge (64 pistas, janela mínima 36 passos de 3,26 ps), DIMM1 converge.
 - Mover o DIMM0 10 mm depois de treinado: **9 de 64 pistas** saem do olho. Por isso a reconfiguração vem antes do treino.

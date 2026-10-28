@@ -33,7 +33,7 @@ def test_protocolos_basicos():
 
 def test_todas_as_interfaces_roteadas(plano):
     ids = {e.id for e in plano.enlaces}
-    assert {"CPU-DIMM0", "CPU-DIMM1", "CPU-GPU", "CPU-FPGA"} <= ids
+    assert {"CPU-DIMM0", "CPU-DIMM1", "CPU-GPU", "CPU-PCH", "CPU-FPGA"} <= ids
     assert {f"GPU-MEM{i}" for i in range(12)} <= ids
     assert all(c.fibra >= 0 for c in plano.canais)
     # cada canal DDR5 da CPU foi para um DIMM diferente, cada canal GDDR7 para um chip diferente
@@ -48,7 +48,7 @@ def test_todas_as_interfaces_roteadas(plano):
 def test_contagem_bate_com_pinagem(plano):
     cpu = obter("i5-13600KF")
     relogio = lambda n: n == "BCLK" or n.startswith("REFCLK")   # vêm do gerador de relógio
-    sinais_cpu = sum(1 for k in ("DDR5_A", "DDR5_B", "PEG", "PCH", "AUX")
+    sinais_cpu = sum(1 for k in ("DDR5_A", "DDR5_B", "PEG", "DMI", "PCIE4", "AUX")
                      for n in cpu.interfaces[k].sinais if not relogio(n))
     sinais_gpu = len(obter("GPU").interfaces["GDDR7"].sinais)
     pinos = {(c.origem, c.pino_origem) for c in plano.canais}
@@ -57,12 +57,15 @@ def test_contagem_bate_com_pinagem(plano):
     assert len(plano.canais) == len(pinos)
 
 
-def test_pch_vai_aos_transceptores_e_relogio_fica_fora(plano):
-    e = plano.enlace("CPU-FPGA")
-    pch = [plano.canais[i] for i in e.canais if plano.canais[i].protocolo == "PCIe4"]
-    assert pch and all(not c.pino_destino.startswith("CTL_") for c in pch)
-    par = {c.pino_origem: c.pino_destino for c in pch}
-    assert par["PCIE4_TX0"] == "PCIE4_RX0" and par["DMI_3"] == "DMI_3"
+def test_dmi_vai_ao_pch_pcie4_ao_fpga_e_relogio_fica_fora(plano):
+    canais = lambda e: [plano.canais[i] for i in plano.enlace(e).canais]
+    pch = {c.pino_origem: c.pino_destino for c in canais("CPU-PCH")}
+    assert pch["DMI_3"] == "DMI_3" and len([n for n in pch if n.startswith("DMI_")]) == 16
+    assert pch["PWROK"] == "PWROK" and pch["RSMRST"] == "RSMRST_CPU"
+    xcvr = [c for c in canais("CPU-FPGA") if c.protocolo == "PCIe4"]
+    assert xcvr and all(not c.pino_destino.startswith("CTL_") for c in xcvr)
+    par = {c.pino_origem: c.pino_destino for c in xcvr}
+    assert par["PCIE4_TX0"] == "PCIE4_RX0" and not any(n.startswith("DMI") for n in par)
     assert not any(c.papel == "REFCLK" or c.pino_origem == "BCLK" for c in plano.canais)
 
 

@@ -23,7 +23,7 @@ python3 -m modulos.sistema.simular     # ~30 s; grava docs/ e web/
 
 Os achados principais:
 
-1. **Mapeamento funciona.** As 17 peças são identificadas só por sondagem fraca,
+1. **Mapeamento funciona.** As 18 peças são identificadas só por sondagem fraca,
    em qualquer posição e rotação, com erro de micrômetros.
 2. **64 comprimentos de onda por fibra não fecham** com anéis de 10 µm: os canais
    ficam mais próximos que a largura do filtro e a diafonia trava a taxa de
@@ -45,6 +45,12 @@ Os achados principais:
 8. **Folga dos números escolhidos:** nenhum abaixo de 20 %; os mais justos são
    vias por chip (25 %) e perda da trilha (29 %). Ver
    [`docs/sensibilidade.md`](docs/sensibilidade.md).
+
+9. **Chipset de verdade.** Um Intel B760 entra como peça: gera os relógios,
+   sequencia a energia e carrega o ME e a BIOS da flash. O FPGA só orquestra a base.
+10. **Memória compartilhada via CXL não fecha:** nem a i5-13600KF nem a GPU
+    suportam CXL. Pelo PCIe com ReBAR, a CPU lê a GDDR7 a ~55 GB/s e ~800 ns,
+    contra ~65 GB/s e ~90 ns da DDR5 local.
 
 ## Decisões de projeto que o verificador exigiu
 
@@ -73,7 +79,7 @@ Tudo em `docs/*.svg`, `docs/resultados.md` e `web/` é gerado. Não edite à mã
 |--------|--------|
 | `modulos/componentes` | As peças: contatos, função de cada pino, trilhos, interfaces |
 | `modulos/sistema` | Base de células, chave da célula, sondagem, identificação, configuração, boot emulado, simulação completa |
-| `modulos/conexoes` | Netlist do sistema inteiro (cada salto tipado) e o verificador de conexões, com 12 regras |
+| `modulos/conexoes` | Netlist do sistema inteiro (cada salto tipado) e o verificador de conexões, com 18 regras; sensibilidade dos números escolhidos |
 | `modulos/energia` | Divisão de corrente nos contatos, VRM, proteção contra curto, árvore de alimentação |
 | `modulos/termico` | Temperatura da base em regime e no transiente |
 | `modulos/optica` | Anel modulador, filtros, receptor, enlace no tempo, controle térmico dos anéis |

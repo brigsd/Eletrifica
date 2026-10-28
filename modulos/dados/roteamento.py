@@ -19,6 +19,10 @@ FOLGA_PARADA_MM = 5.0        # desvio em cada parada de um barramento WDM
 SAIDA_MM = 3.0               # trecho reto saindo do tradutor
 PAPEIS_BARRAMENTO = ("DQ", "DQS", "TX", "RX", "DMI")   # vão em fibras de dados; o resto, de controle
 PARADAS_MAX = 2              # destinos por fibra de barramento: mais paradas, mais atraso
+# sinais de plataforma da CPU que são do chipset; o resto do AUX (JTAG, VIDSCK) é do FPGA
+PARA_PCH = ("PWROK", "PLTRST", "RSMRST", "SLP_S3", "THERMTRIP", "CATERR", "PROCHOT", "PECI",
+            "SMBUS_CLK", "SMBUS_DATA")
+NOME_NO_PCH = {"RSMRST": "RSMRST_CPU", "SLP_S3": "SLP_S3_CPU"}
 
 
 @dataclass
@@ -245,17 +249,28 @@ def _enlaces(cfg):
     enlaces.append(("CPU-GPU", "CPU", "GPU", "PEG", mapa))
 
     xcvr = set(fpga.peca.interfaces["XCVR"].sinais)
+    pch = pecas.get("PCH")
+    para_pch = set(PARA_PCH) if pch else set()
+
+    def par_pcie4(n):
+        return n.replace("TX", "#").replace("RX", "TX").replace("#", "RX")
+
+    if pch:
+        mapa = [(n, n, "DMI", "PCIe4") for n in cpu.peca.interfaces["DMI"].sinais]
+        mapa += [(n, NOME_NO_PCH.get(n, n), "AUX", "AUX") for n in cpu.peca.interfaces["AUX"].sinais
+                 if n in para_pch]
+        enlaces.append(("CPU-PCH", "CPU", "PCH", "DMI", mapa))
     mapa = []
-    for n in cpu.peca.interfaces["PCH"].sinais:
+    for n in cpu.peca.interfaces["PCIE4"].sinais:
         if _relogio(n):
             continue
-        par = n.replace("TX", "#").replace("RX", "TX").replace("#", "RX") if n.startswith("PCIE4") else n
-        if par not in xcvr:
+        if par_pcie4(n) not in xcvr:
             raise ValueError(f"o FPGA não tem transceptor para {n}")
-        mapa.append((n, par, "PCH", "PCIe4"))
+        mapa.append((n, par_pcie4(n), "PCIE4", "PCIe4"))
     ctl = iter(fpga.peca.interfaces["CTL"].sinais)
-    mapa += [(n, next(ctl), "AUX", "AUX") for n in cpu.peca.interfaces["AUX"].sinais if not _relogio(n)]
-    enlaces.append(("CPU-FPGA", "CPU", "FPGA", "PCH", mapa))
+    mapa += [(n, next(ctl), "AUX", "AUX") for n in cpu.peca.interfaces["AUX"].sinais
+             if not _relogio(n) and n not in para_pch]
+    enlaces.append(("CPU-FPGA", "CPU", "FPGA", "PCIE4", mapa))
     return enlaces
 
 

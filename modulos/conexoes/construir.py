@@ -17,6 +17,7 @@ from scipy.optimize import linear_sum_assignment
 from modulos.conexoes.netlist import Netlist, Requisito, Sinal
 from modulos.conexoes.padroes import PADROES, padrao_do_pino
 from modulos.conexoes.posicao import Ocupacao, manhattan
+from modulos.conexoes.verificador import REGIOES_FIRMWARE
 from modulos.dados import comandos as CMD
 from modulos.dados import ddr5 as DDR5
 from modulos.optica import enlace as E
@@ -63,6 +64,20 @@ SQUELCH_PS = 4000.0            # ocioso elétrico do PCIe atravessando a luz
 TERMINACAO_TRADUTOR_OHM = (34.0, 40.0, 48.0, 60.0, 80.0, 120.0, 240.0, None)   # None = aberto
 FORCA_TRADUTOR_OHM = (34.0, 40.0, 48.0)
 CONTROLADORES_DE_MEMORIA = ("i5-13600KF", "GPU")
+
+# plataforma Intel: o chipset (PCH) gera os relógios, sequencia a energia e lê a flash
+REGIOES_FLASH = ("descritor", "ME", "BIOS")      # o que a imagem da flash carrega
+FLASH_MB = 32
+RELOGIOS_DO_PCH = {("CPU", "BCLK"): "CLKOUT_BCLK", ("CPU", "REFCLK_PEG"): "CLKOUT_PEG_CPU",
+                   ("GPU", "REFCLK_PEG"): "CLKOUT_PEG_GPU", ("CPU", "REFCLK_PCIE4"): "CLKOUT_PCIE4_CPU",
+                   ("FPGA", "REFCLK_XCVR"): "CLKOUT_XCVR"}
+# FPGA <-> PCH por trilha: (pino do PCH, sentido visto do FPGA)
+HANDSHAKE_PCH = (("RSMRST_IN", "ida"), ("SYS_PWROK", "ida"), ("SLP_S3_OUT", "volta"),
+                 ("SMB_FPGA_CLK", "ida"), ("SMB_FPGA_DATA", "duplo"))
+SPI_PCH = (("SPI_CLK", "spi_clk", "ida"), ("SPI_CS0", "spi_cs", "ida"), ("SPI_MOSI", "spi_mosi", "ida"),
+           ("SPI_MISO", "spi_miso", "volta"))
+PADRAO_SPI = "CMOS-1V8"
+OPCIONAL_CXL = "memoria-compartilhada-CXL"
 
 # constantes que construir(..., parametros={...}) pode sobrepor numa chamada
 PARAMETROS = ("VIAS_MAX", "CHIP_MM", "AFASTAMENTO_CHIP_MM", "VDD_CHIP_V", "PJ_BIT_TX", "PJ_BIT_RX",
@@ -179,12 +194,22 @@ class _Construtor:
         nl.ligar(("fonte:atx", "12v"), ("rail:12V", "rede"), "trilha")
 
         fpga = self.pecas["FPGA"]
-        caps = ["controle", "sequenciamento-PWROK", "SPD/I3C"]
-        if "XCVR" in fpga.peca.interfaces:          # DMI exige transceptores, não E/S comum
-            caps.append("PCH/DMI")
+        self.pch = self.pecas.get("PCH")
+        # o FPGA só orquestra a base; DMI é do chipset. Sem PCH, o FPGA sequencia o que der
+        caps = ["controle"] + ([] if self.pch else ["sequenciamento-PWROK", "SPD/I3C"])
         nl.bloco("ctl:fpga", "controlador", (fpga.x, fpga.y), peca="FPGA", capacidades=caps)
         nl.porta("ctl:fpga", "vdd", "energia", "entra", tensao_v=0.85)
-        nl.porta("ctl:fpga", "spi_flash", "controle", "sai", barramento="SPI")
+        if not self.pch:
+            nl.porta("ctl:fpga", "spi_flash", "controle", "sai", barramento="SPI")
+        else:
+            pch = self.pch
+            caps_pch = ["sequenciamento-PWROK", "SPD/I3C"]
+            if "DMI" in pch.peca.interfaces:
+                caps_pch.append("PCH/DMI")
+            nl.bloco("ctl:pch", "controlador", (pch.x, pch.y), peca="PCH", plataforma="PCH",
+                     capacidades=caps_pch, nota="PMC, ME e controlador SPI do chipset")
+            nl.porta("ctl:pch", "vdd", "energia", "entra", tensao_v=1.05)
+            nl.porta("ctl:pch", "clk", "controle", "sai")
 
         z = self.m.zonas["vrm_cpu"]
         vx, vy = (z["x0"] + z["x1"]) / 2, (z["y0"] + z["y1"]) / 2
@@ -198,16 +223,33 @@ class _Construtor:
         nl.porta("ctl:vrm", "ctl", "controle", "entra")
         nl.porta("ctl:vrm", "vdd", "energia", "entra", tensao_v=3.3)
 
-        cx, cy = self.oc.colocar((fpga.x + 30, fpga.y), 6, 6, "clk:ref")
-        nl.bloco("clk:ref", "relogio", (cx, cy), frequencia_mhz=100.0, jitter_fs=100.0,
-                 capacidades=["BCLK", "REFCLK"])
-        nl.porta("clk:ref", "vdd", "energia", "entra", tensao_v=3.3)
-        nl.porta("clk:ref", "ctl", "controle", "entra")
-        fx, fy = self.oc.colocar((fpga.x, fpga.y - 28), 6, 5, "flash:uefi")
-        nl.bloco("flash:uefi", "flash", (fx, fy), capacidade_mb=32, capacidades=["firmware-UEFI"])
-        nl.porta("flash:uefi", "spi", "controle", "entra", barramento="SPI")
+        if self.pch:
+            self.relogio = "clk:pch"
+            nl.bloco("clk:pch", "relogio", (self.pch.x, self.pch.y), peca="PCH", frequencia_mhz=100.0,
+                     jitter_fs=150.0, capacidades=["BCLK", "REFCLK"], nota="gerador de relógio do chipset")
+            nl.porta("clk:pch", "vdd", "energia", "entra", tensao_v=1.05)
+            nl.porta("clk:pch", "ctl", "controle", "entra")
+            nl.ligar(("ctl:pch", "clk"), ("clk:pch", "ctl"), "interno")
+        else:
+            self.relogio = "clk:ref"
+            cx, cy = self.oc.colocar((fpga.x + 30, fpga.y), 6, 6, "clk:ref")
+            nl.bloco("clk:ref", "relogio", (cx, cy), frequencia_mhz=100.0, jitter_fs=100.0,
+                     capacidades=["BCLK", "REFCLK"])
+            nl.porta("clk:ref", "vdd", "energia", "entra", tensao_v=3.3)
+            nl.porta("clk:ref", "ctl", "controle", "entra")
+        perto = (self.pch.x + 24, self.pch.y) if self.pch else (fpga.x, fpga.y - 28)
+        fx, fy = self.oc.colocar(perto, 6, 5, "flash:uefi")
+        regioes = list(REGIOES_FLASH)
+        nl.bloco("flash:uefi", "flash", (fx, fy), capacidade_mb=FLASH_MB, regioes=regioes,
+                 capacidades=[c for c, rs in REGIOES_FIRMWARE.items() if set(rs) <= set(regioes)])
         nl.porta("flash:uefi", "vdd", "energia", "entra", tensao_v=1.8)
-        nl.ligar(("ctl:fpga", "spi_flash"), ("flash:uefi", "spi"), "trilha")
+        if self.pch:
+            for _, porta, sentido in SPI_PCH:
+                nl.porta("flash:uefi", porta, "eletrico", "sai" if sentido == "volta" else "entra",
+                         padrao=PADRAO_SPI)
+        else:
+            nl.porta("flash:uefi", "spi", "controle", "entra", barramento="SPI")
+            nl.ligar(("ctl:fpga", "spi_flash"), ("flash:uefi", "spi"), "trilha")
 
         # trilhos auxiliares: criados no primeiro uso
         self.aux_alvos = {"rail:aux:3V3": (3.3, (e12["x"] + 20, e12["y"] + 20)),
@@ -216,9 +258,10 @@ class _Construtor:
                           "rail:aux:1V1": (1.1, (vx, z["y1"] + 16)),
                           "rail:aux:1V2": (1.2, (110, 112))}
         self._alimentar("ctl:vrm", "vdd", "rail:aux:3V3", 0.05)
-        self._alimentar("clk:ref", "vdd", "rail:aux:3V3", 0.1)
+        if not self.pch:
+            self._alimentar("clk:ref", "vdd", "rail:aux:3V3", 0.1)
+            self._ctl_i3c("clk:ref")
         self._alimentar("flash:uefi", "vdd", "rail:aux:1V8", 0.02)
-        self._ctl_i3c("clk:ref")
         self._ctl_i3c("ctl:vrm")
 
         # trilhos das peças
@@ -263,6 +306,10 @@ class _Construtor:
                 self.reg_de_trilho[rid] = rg
                 self._consumidor(nome, t, rid, t.corrente_max)
         self._alimentar("ctl:fpga", "vdd", "rail:FPGA:VCCINT", 0.0)
+        if self.pch:
+            # o PMC e o ME vivem no poço de standby; o gerador de relógio, no principal
+            self._alimentar("ctl:pch", "vdd", "rail:PCH:VCCSTBY", 0.0)
+            self._alimentar("clk:pch", "vdd", "rail:PCH:VCCPRIM", 0.0)
 
     def _consumidor(self, peca, trilho, rid, corrente_a):
         """Os pinos de alimentação de um trilho da peça, agregados num bloco só."""
@@ -834,6 +881,8 @@ class _Construtor:
             if PADROES[pad].terminacao == "dreno_aberto":
                 self._pullup(f"{peca}:{pino}", (t, "b"), self._aux_rail(PADROES[pad].tensao_v),
                              PADROES[pad].tensao_v)
+                if not meio_cam:       # sem conversor é uma rede só: um pull-up basta
+                    break
         cam = [(f"{a_peca}:{a_pino}", "e"), (f"cel:{a_peca}:{a_pino}", "pino"),
                (f"cel:{a_peca}:{a_pino}", "base"), (ta, "a"), (ta, "b")] + meio_cam + \
               [(tb, "b"), (tb, "a"), (f"cel:{b_peca}:{b_pino}", "base"),
@@ -852,17 +901,53 @@ class _Construtor:
         nl.sinal(s)
 
     def sideband(self):
-        """SPD de cada DIMM (HSCL/HSDA, I3C de 1,0 V) até pinos livres do FPGA, por trilha."""
+        """SPD de cada DIMM (HSCL/HSDA, I3C de 1,0 V) por trilha: ao chipset, ou ao FPGA sem ele."""
         if "FPGA" not in self.pecas:
             return
-        usados = {c.pino_destino for c in self.plano.canais if c.destino == "FPGA"}
-        livres = iter(n for n in self.pecas["FPGA"].peca.interfaces["CTL"].sinais if n not in usados)
-        for dimm in sorted(n for n in self.pecas if n.startswith("DIMM")):
+        livres = self._ctl_livres()
+        dimms = sorted(n for n in self.pecas if n.startswith("DIMM"))
+        spd_pch = list(self.pch.peca.interfaces["SPD"].sinais) if self.pch else []
+        for k, dimm in enumerate(dimms):
             if "SPD" not in self.pecas[dimm].peca.interfaces:
                 continue
             for pino, sentido in (("HSCL", "ida"), ("HSDA", "duplo")):
-                c = _CanalLento("FPGA-" + dimm, sentido, "AUX", pino, "SPD_" + dimm)
-                self._lento(c, "FPGA", next(livres), dimm, pino)
+                if self.pch and f"SPD{k}_{pino}" in spd_pch:
+                    c = _CanalLento("PCH-" + dimm, sentido, "AUX", pino, "SPD_" + dimm)
+                    self._lento(c, "PCH", f"SPD{k}_{pino}", dimm, pino)
+                else:
+                    c = _CanalLento("FPGA-" + dimm, sentido, "AUX", pino, "SPD_" + dimm)
+                    self._lento(c, "FPGA", next(livres), dimm, pino)
+
+    def _ctl_livres(self):
+        if not hasattr(self, "_livres"):
+            usados = {c.pino_destino for c in self.plano.canais if c.destino == "FPGA"}
+            self._livres = iter(n for n in self.pecas["FPGA"].peca.interfaces["CTL"].sinais
+                                if n not in usados)
+        return self._livres
+
+    def plataforma(self):
+        """Com o chipset: o FPGA sequencia a base e conversa com o PCH; o PCH lê a flash."""
+        if not self.pch:
+            return
+        nl = self.nl
+        livres = self._ctl_livres()
+        for pino, sentido in HANDSHAKE_PCH:
+            c = _CanalLento("FPGA-PCH", sentido, "AUX", pino, "PM_PCH")
+            self._lento(c, "FPGA", next(livres), "PCH", pino)
+        # SPI do chipset até a flash, por trilha
+        for pino, porta, sentido in SPI_PCH:
+            tid = self.pino("PCH", pino, DIREITO[sentido], PADRAO_SPI)
+            self._comprimento(tid, nl.blocos["flash:uefi"].posicao, CAMADA_LENTA)
+            nl.ligar((tid, "b"), ("flash:uefi", porta), "trilha")
+            cam = [(f"PCH:{pino}", "e"), (f"cel:PCH:{pino}", "pino"), (f"cel:PCH:{pino}", "base"),
+                   (tid, "a"), (tid, "b"), ("flash:uefi", porta)]
+            orig, dest = (f"PCH:{pino}", "e"), ("flash:uefi", porta)
+            sid = f"PCH.{pino}->flash.{porta}"
+            if sentido == "volta":
+                sid, orig, dest, cam = f"flash.{porta}->PCH.{pino}", dest, orig, cam[::-1]
+            s = Sinal(sid, "AUX", "SPI", PADRAO_SPI, orig, dest, ("ida",), "SPI")
+            s.caminhos["ida"] = cam
+            nl.sinal(s)
 
     def _aux_rail(self, v):
         for nome, tv in (("rail:aux:1V05", 1.05), ("rail:aux:1V1", 1.1), ("rail:aux:1V2", 1.2),
@@ -884,22 +969,38 @@ class _Construtor:
     # ------------------------------------------------------------------ relógios
     def relogios(self):
         nl = self.nl
+        clk = self.relogio
         alvos = []
         for peca in sorted(self.prot):
+            if peca == "PCH":
+                continue
             for pino, prot in sorted(self.prot[peca].items()):
                 if pino == "BCLK" or pino.startswith("REFCLK"):
                     alvos.append((peca, pino, prot))
         for n, (peca, pino, prot) in enumerate(alvos):
-            nl.porta("clk:ref", f"out{n}", "eletrico", "sai", padrao="HCSL-100M")
+            nl.porta(clk, f"out{n}", "eletrico", "sai", padrao="HCSL-100M")
             tid = self.pino(peca, pino, "entra", "HCSL-100M")
-            self._comprimento(tid, nl.blocos["clk:ref"].posicao, CAMADA_LENTA)
-            nl.ligar(("clk:ref", f"out{n}"), (tid, "b"), "trilha")
+            saida = RELOGIOS_DO_PCH.get((peca, pino)) if self.pch else None
+            if saida:
+                # do gerador interno do chipset para a bola CLKOUT, e dela por trilha até o destino
+                t_pch = self.pino("PCH", saida, "bidir", "HCSL-100M")
+                nl.ligar((clk, f"out{n}"), (f"PCH:{saida}", "e"), "interno")
+                xa, xb = nl.blocos[t_pch].posicao, nl.blocos[tid].posicao
+                meio = ((xa[0] + xb[0]) / 2, (xa[1] + xb[1]) / 2)
+                self._comprimento(t_pch, meio, CAMADA_LENTA)
+                self._comprimento(tid, meio, CAMADA_LENTA)
+                nl.ligar((t_pch, "b"), (tid, "b"), "trilha")
+                inicio = [(clk, f"out{n}"), (f"PCH:{saida}", "e"), (f"cel:PCH:{saida}", "pino"),
+                          (f"cel:PCH:{saida}", "base"), (t_pch, "a"), (t_pch, "b")]
+            else:
+                self._comprimento(tid, nl.blocos[clk].posicao, CAMADA_LENTA)
+                nl.ligar((clk, f"out{n}"), (tid, "b"), "trilha")
+                inicio = [(clk, f"out{n}")]
             # relógios independentes: cada um é o seu próprio grupo
-            s = Sinal(f"clk:ref.out{n}->{peca}.{pino}", prot, "REFCLK", "HCSL-100M",
-                      ("clk:ref", f"out{n}"), (f"{peca}:{pino}", "e"), ("ida",), f"REFCLK_{peca}_{pino}")
-            s.caminhos["ida"] = [("clk:ref", f"out{n}"), (tid, "b"), (tid, "a"),
-                                 (f"cel:{peca}:{pino}", "base"), (f"cel:{peca}:{pino}", "pino"),
-                                 (f"{peca}:{pino}", "e")]
+            s = Sinal(f"{clk}.out{n}->{peca}.{pino}", prot, "REFCLK", "HCSL-100M",
+                      (clk, f"out{n}"), (f"{peca}:{pino}", "e"), ("ida",), f"REFCLK_{peca}_{pino}")
+            s.caminhos["ida"] = inicio + [(tid, "b"), (tid, "a"), (f"cel:{peca}:{pino}", "base"),
+                                          (f"cel:{peca}:{pino}", "pino"), (f"{peca}:{pino}", "e")]
             nl.sinal(s)
 
     # --------------------------------------------------------------------- laser
@@ -1001,21 +1102,35 @@ class _Construtor:
 
     # ---------------------------------------------------------------- requisitos
     def requisitos(self):
-        R = self.nl.requisitos
-        R += [Requisito("CPU", "PCH/DMI", "ctl:fpga"),
+        nl = self.nl
+        R = nl.requisitos
+        plat = "ctl:pch" if self.pch else "ctl:fpga"
+        caps_plat = nl.blocos[plat].atributos.get("capacidades", [])
+        flash = nl.blocos["flash:uefi"].atributos
+        # a flash só serve se estiver ligada a quem a lê, com a região certa
+        ligada = (any(s.destino == ("flash:uefi", "spi_clk") for s in nl.sinais.values()) if self.pch
+                  else bool(nl.ligacoes_de(("flash:uefi", "spi"))))
+        prov_flash = lambda cap: "flash:uefi" if ligada and cap in flash.get("capacidades", ()) else None
+        R += [Requisito("CPU", "PCH/DMI", plat if "PCH/DMI" in caps_plat else None),
               Requisito("CPU", "VR-SVID", "ctl:vrm"),
-              Requisito("CPU", "BCLK", "clk:ref"),
-              Requisito("CPU", "firmware-UEFI", "flash:uefi"),
-              Requisito("CPU", "sequenciamento-PWROK", "ctl:fpga")]
+              Requisito("CPU", "BCLK", self.relogio),
+              Requisito("CPU", "firmware-UEFI", prov_flash("firmware-UEFI")),
+              Requisito("CPU", "sequenciamento-PWROK", plat)]
+        if self.pch:
+            R.append(Requisito("PCH", "firmware-ME", prov_flash("firmware-ME")))
         for nome in self.pecas:
             if nome.startswith("DIMM"):
-                tem = all(f"{nome}:{p}" in self.nl.blocos for p in ("HSCL", "HSDA"))
-                R.append(Requisito(nome, "SPD/I3C", "ctl:fpga" if tem else None))
+                tem = all(f"{nome}:{p}" in nl.blocos for p in ("HSCL", "HSDA"))
+                R.append(Requisito(nome, "SPD/I3C", plat if tem else None))
         raiz = "CPU:PEG_TX0"
-        if raiz in self.nl.blocos:
-            self.nl.blocos[raiz].atributos["capacidades"] = ["raiz-PCIe"]
-        R += [Requisito("GPU", "raiz-PCIe", raiz if raiz in self.nl.blocos else None),
-              Requisito("GPU", "12V-cabo", "fonte:atx")]
+        tem_raiz = raiz in nl.blocos
+        # memória compartilhada coerente exige CXL nas duas pontas do PEG; é opcional
+        cxl = tem_raiz and all(n in self.pecas and self.pecas[n].peca.cxl for n in ("CPU", "GPU"))
+        if tem_raiz:
+            nl.blocos[raiz].atributos["capacidades"] = ["raiz-PCIe"] + ([OPCIONAL_CXL] if cxl else [])
+        R += [Requisito("GPU", "raiz-PCIe", raiz if tem_raiz else None),
+              Requisito("GPU", "12V-cabo", "fonte:atx"),
+              Requisito("GPU", OPCIONAL_CXL, raiz if cxl else None)]
 
 
 class _CanalLento:
@@ -1053,6 +1168,7 @@ def construir(montagem, configuracao, plano, cfg_optica, chave=None, posicioname
         c.sinais_rapidos()
         c.sinais_lentos()
         c.sideband()
+        c.plataforma()
         c.relogios()
         c.laser()
         c.energia_chips()

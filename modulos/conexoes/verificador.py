@@ -18,7 +18,12 @@ from modulos.dados.protocolos import PROTOCOLOS
 REGRAS = ("R01-caminho", "R02-sentido", "R03-padrao", "R04-banda", "R05-optico",
           "R06-energia", "R07-controle", "R08-capacidade", "R09-tempo", "R10-relogio",
           "R11-requisito", "R12-orfao", "R13-temperatura", "R14-consumo",
-          "R15-decodificacao", "R16-ajuste", "R17-pcie")
+          "R15-decodificacao", "R16-ajuste", "R17-pcie", "R18-memoria-compartilhada")
+
+# capacidades que melhoram o sistema mas não impedem o boot (R18 avisa)
+OPCIONAIS = {"memoria-compartilhada-CXL"}
+# regiões da imagem da flash que cada firmware exige
+REGIOES_FIRMWARE = {"firmware-UEFI": ("descritor", "BIOS"), "firmware-ME": ("descritor", "ME")}
 
 # perda máxima das trilhas elétricas em cada lado do enlace, na frequência de Nyquist
 ORCAMENTO_TRILHA_DB = {"PCIe5-CML": 8.0, "PCIe4-CML": 8.0, "GDDR7-DQ": 4.0, "GDDR7-EDC": 4.0,
@@ -662,6 +667,12 @@ def _atraso_ps(net, cam, ps_mm):
     return t
 
 
+def atraso_caminho_ps(net, caminho, protocolo):
+    """Atraso pino a pino de um caminho (trilhas, fibras e blocos ativos)."""
+    pr = PROTOCOLOS.get(protocolo)
+    return _atraso_ps(net, caminho, pr.ps_por_mm_trilha if pr else PS_POR_MM_TRILHA)
+
+
 def _r09(net, rel, contexto):
     R = "R09-tempo"
     ctx = contexto or {}
@@ -765,6 +776,8 @@ def _r11(net, rel):
     R = "R11-requisito"
     for q in net.requisitos:
         alvo = f"{q.peca}:{q.capacidade}"
+        if q.capacidade in OPCIONAIS:
+            continue
         if not q.provedor:
             rel.violacoes.append(Violacao(R, "erro", alvo, f"{q.peca} precisa de {q.capacidade}: ninguém oferece"))
             continue
@@ -775,6 +788,25 @@ def _r11(net, rel):
         elif q.capacidade not in b.atributos.get("capacidades", ()):
             rel.violacoes.append(Violacao(R, "erro", alvo,
                                           f"{q.provedor} não oferece {q.capacidade} (pedido por {q.peca})"))
+        elif b.tipo == "flash" and q.capacidade in REGIOES_FIRMWARE:
+            falta = [r for r in REGIOES_FIRMWARE[q.capacidade] if r not in b.atributos.get("regioes", ())]
+            if falta:
+                rel.violacoes.append(Violacao(R, "erro", alvo,
+                                              f"{q.provedor} não tem a região {', '.join(falta)} "
+                                              f"para {q.capacidade} (pedido por {q.peca})"))
+
+
+def _r18(net, rel):
+    """Memória compartilhada coerente (CXL) é opcional: sem ela o sistema liga e usa ReBAR."""
+    R = "R18-memoria-compartilhada"
+    for q in net.requisitos:
+        if q.capacidade not in OPCIONAIS:
+            continue
+        b = net.blocos.get(q.provedor) if q.provedor else None
+        if b is None or q.capacidade not in b.atributos.get("capacidades", ()):
+            rel.violacoes.append(Violacao(R, "aviso", f"{q.peca}:{q.capacidade}",
+                                          f"{q.peca} sem {q.capacidade}: falta CXL numa das pontas; a memória "
+                                          f"do outro lado só é vista por ReBAR sobre PCIe, sem coerência"))
 
 
 def _r12(net, rel):
@@ -1106,4 +1138,5 @@ def verificar(netlist, contexto=None):
     _r15(netlist, rel)
     _r16(netlist, rel)
     _r17(netlist, rel, contexto)
+    _r18(netlist, rel)
     return rel

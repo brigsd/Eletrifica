@@ -15,6 +15,8 @@ CONVERSOR = {
     ("FPGA", "VCCAUX"): ("buck 1,8 V", 0.88),
     ("FPGA", "MGTAVCC"): ("buck 0,9 V de baixo ruído (transceptores)", 0.85),
     ("FPGA", "MGTAVTT"): ("buck 1,2 V de baixo ruído (transceptores)", 0.85),
+    ("PCH", "VCCSTBY"): ("buck 1,05 V de standby", 0.85),
+    ("PCH", "VCCPRIM"): ("buck 1,05 V", 0.88),
 }
 
 

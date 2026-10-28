@@ -48,11 +48,23 @@ def test_sondagem_nao_vaza_nomes(mapeado):
 def test_configuracao_so_liga_celulas_identificadas(mapeado):
     m, _, sond, ids = mapeado
     cfg = C.configurar(m.base, ids, sond)
-    assert {p.nome for p in cfg.pecas} >= {"CPU", "GPU", "FPGA", "DIMM0", "DIMM1", "MEM0", "MEM11"}
+    assert {p.nome for p in cfg.pecas} >= {"CPU", "GPU", "FPGA", "PCH", "DIMM0", "DIMM1", "MEM0", "MEM11"}
     ligadas = cfg.funcao > 0
     assert (cfg.peca[ligadas] >= 0).all()
     cpu = cfg.por_nome("CPU")
     assert len(cpu.celulas_do_pino) == 1700
+
+
+@pytest.mark.parametrize("pid,graus", [("CPU", 37.0), ("CPU", 133.0), ("M3", 63.5), ("PCH", 301.0)])
+def test_identifica_em_qualquer_giro(pid, graus):
+    m = copy.deepcopy(B.carregar())
+    col = m.por_id(pid)
+    col.rot = graus
+    m.colocacoes = [col]
+    _, _, ids = _mapear(m)
+    l = M.conferir(m, ids)[0]
+    assert l["tipo_achado"] == l["tipo_real"]
+    assert l["erro_mm"] < 0.05 and abs(l["erro_graus"]) < 0.5
 
 
 def test_trocar_pecas_de_lugar_e_reiniciar():

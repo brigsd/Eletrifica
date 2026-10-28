@@ -22,6 +22,8 @@ def montado():
 def test_todo_pino_de_sinal_vira_sinal_com_caminho(montado):
     cfg, _, nl = montado
     pontas = {s.origem[0] for s in nl.sinais.values()} | {s.destino[0] for s in nl.sinais.values()}
+    # as saídas de relógio do PCH ficam no meio do caminho: a origem é o gerador interno
+    pontas |= {b for s in nl.sinais.values() if s.papel == "REFCLK" for b, _ in s.caminhos["ida"]}
     faltando = []
     for pc in cfg.pecas:
         if pc.nome == "FPGA":       # banco genérico de E/S: só os pinos usados entram
@@ -115,23 +117,38 @@ def test_requisitos_honestos(montado):
     req = {(r.peca, r.capacidade): r.provedor for r in nl.requisitos}
     for cap in ("PCH/DMI", "VR-SVID", "BCLK", "firmware-UEFI", "sequenciamento-PWROK"):
         assert ("CPU", cap) in req
-    assert req[("DIMM0", "SPD/I3C")] == "ctl:fpga"
+    # o chipset é quem atende a CPU e o SPD; o FPGA só orquestra a base
+    assert req[("CPU", "PCH/DMI")] == req[("CPU", "sequenciamento-PWROK")] == "ctl:pch"
+    assert req[("CPU", "BCLK")] == "clk:pch"
+    assert req[("DIMM0", "SPD/I3C")] == req[("DIMM1", "SPD/I3C")] == "ctl:pch"
+    assert req[("CPU", "firmware-UEFI")] == req[("PCH", "firmware-ME")] == "flash:uefi"
+    assert nl.blocos["flash:uefi"].atributos["regioes"] == ["descritor", "ME", "BIOS"]
+    assert "PCH/DMI" not in nl.blocos["ctl:fpga"].atributos["capacidades"]
+    assert req[("GPU", "memoria-compartilhada-CXL")] is None      # opcional: i5 e GPU sem CXL
     for ch in nl.por_tipo("chip_tradutor"):
         for cap in ("laser", "energia", "controle"):
             assert req.get((ch.id, cap)), (ch.id, cap)
+        assert req[(ch.id, "controle")] == "ctl:fpga"
     # todo provedor declara o que oferece
     for r in nl.requisitos:
+        if r.capacidade == "memoria-compartilhada-CXL":
+            continue
         assert r.provedor and r.capacidade in nl.blocos[r.provedor].atributos.get("capacidades", ()), r
 
 
-def test_pch_chega_aos_transceptores_do_fpga(montado):
+def test_dmi_vai_ao_pch_e_pcie4_aos_transceptores_do_fpga(montado):
     _, _, nl = montado
-    dmi = [s for s in nl.sinais.values() if s.protocolo == "PCIe4" and s.papel != "REFCLK"]
-    assert dmi
-    for s in dmi:
+    pcie4 = [s for s in nl.sinais.values() if s.protocolo == "PCIe4" and s.papel != "REFCLK"]
+    pecas = lambda s: {s.origem[0].split(":")[0], s.destino[0].split(":")[0]}
+    dmi = [s for s in pcie4 if "DMI" in s.id]
+    assert len(dmi) == 16 and all(pecas(s) == {"CPU", "PCH"} for s in dmi)
+    assert {s.id.split("->")[0] for s in pcie4 if pecas(s) == {"CPU", "FPGA"}} >= {"CPU.PCIE4_TX0"}
+    for s in pcie4:
         pontas = {s.origem[0], s.destino[0]}
         assert not any(p.startswith("FPGA:CTL_") for p in pontas), s.id
         assert all(nl.blocos[p].portas["e"].padrao == "PCIe4-CML" for p in pontas), s.id
+        tipos = {nl.blocos[b].tipo for b, _ in s.caminhos["ida"]}
+        assert "fibra" in tipos, s.id
 
 
 def test_cada_entrada_de_relogio_tem_uma_fonte(montado):
@@ -141,17 +158,23 @@ def test_cada_entrada_de_relogio_tem_uma_fonte(montado):
         if s.padrao == "HCSL-100M":
             fontes.setdefault(s.destino, []).append(s.origem)
     assert {d[0] for d in fontes} >= {"CPU:BCLK", "CPU:REFCLK_PEG", "GPU:REFCLK_PEG", "FPGA:REFCLK_XCVR"}
-    assert all(len(v) == 1 and v[0][0] == "clk:ref" for v in fontes.values())
+    assert all(len(v) == 1 and v[0][0] == "clk:pch" for v in fontes.values())
+    # do gerador do chipset para a bola CLKOUT e dela por trilha
+    s = next(x for x in nl.sinais.values() if x.destino == ("CPU:BCLK", "e"))
+    assert [b for b, _ in s.caminhos["ida"]][:2] == ["clk:pch", "PCH:CLKOUT_BCLK"]
+    assert "clk:ref" not in nl.blocos
 
 
-def test_spd_do_dimm_por_trilha_com_conversor_e_pullup(montado):
+def test_spd_do_dimm_ao_pch_por_trilha_com_um_pullup(montado):
     _, _, nl = montado
-    for dimm in ("DIMM0", "DIMM1"):
+    for k, dimm in enumerate(("DIMM0", "DIMM1")):
         for pino in ("HSCL", "HSDA"):
             s = next(x for x in nl.sinais.values() if x.destino == (f"{dimm}:{pino}", "e"))
+            assert s.origem == (f"PCH:SPD{k}_{pino}", "e"), s.id
             tipos = {nl.blocos[b].tipo for b, _ in s.caminhos["ida"]}
-            assert "conversor_nivel" in tipos and "fibra" not in tipos, s.id
-            assert f"pu:{dimm}:{pino}" in nl.blocos
+            # I3C de 1,0 V nas duas pontas: sem conversor, um pull-up só
+            assert "conversor_nivel" not in tipos and "fibra" not in tipos, s.id
+            assert f"pu:PCH:SPD{k}_{pino}" in nl.blocos and f"pu:{dimm}:{pino}" not in nl.blocos
         assert len(nl.sinais[next(k for k in nl.sinais if k.endswith(f"{dimm}.HSDA"))].sentidos) == 2
 
 

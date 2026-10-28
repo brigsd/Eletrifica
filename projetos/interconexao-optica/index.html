@@ -288,7 +288,8 @@
   };
 
   // ---- menu ---------------------------------------------------------------
-  const GRUPOS = [["Processamento", ["i5-13600KF", "GPU", "FPGA"]], ["Memória", ["DDR5-DIMM", "GDDR7"]]];
+  const GRUPOS = [["Processamento", ["i5-13600KF", "GPU"]], ["Plataforma", ["PCH", "FPGA"]],
+                  ["Memória", ["DDR5-DIMM", "GDDR7"]]];
   const menu = document.getElementById("menu"), boxes = {};
   GRUPOS.forEach(([titulo, tipos]) => {
     const itens = cena.pecas.filter(p => tipos.includes(p.tipo)).sort((a, b) =>

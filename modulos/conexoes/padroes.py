@@ -41,6 +41,7 @@ PADROES = {p.nome: p for p in (
     Padrao("OD-1V05", "se", 1.05, "NRZ", 0.05, "dreno_aberto", 50, False, False),
     Padrao("OD-1V05-BIDIR", "se", 1.05, "NRZ", 0.05, "dreno_aberto", 50, True, False),
     Padrao("I3C-1V0", "se", 1.0, "NRZ", 0.0125, "dreno_aberto", 50, True, False),
+    Padrao("I3C-1V0-SCL", "se", 1.0, "NRZ", 0.0125, "dreno_aberto", 50, False, False),
     Padrao("OD-1V1", "se", 1.1, "estatico", 0.001, "dreno_aberto", 50, False, False),
     Padrao("SVID", "se", 1.0, "NRZ", 0.05, "dreno_aberto", 50, False, False),
     Padrao("SVID-DATA", "se", 1.0, "NRZ", 0.05, "dreno_aberto", 50, True, False),
@@ -59,7 +60,7 @@ def padrao_do_pino(protocolo, nome):
     p = papel(nome)
     if protocolo == "DDR5-4800":
         if nome.endswith(("HSCL", "HSDA")):
-            return "I3C-1V0"
+            return "I3C-1V0-SCL" if nome.endswith("HSCL") else "I3C-1V0"
         return {"DQ": "DDR5-DQ", "DQS": "DDR5-DQS", "CA": "DDR5-CA", "CS": "DDR5-CA",
                 "CK": "DDR5-CK", "RESET": "CMOS-1V1", "ALERT": "OD-1V1"}[p]
     if protocolo in ("PCIe5", "PCIe4"):
