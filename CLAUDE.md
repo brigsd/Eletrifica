@@ -175,6 +175,8 @@ Regras do modelo:
   conexões tem de entrar na netlist, senão o verificador não o enxerga.
 - **Uma chave por célula.** `modulos/sistema/celula.py` é a especificação
   única, usada pela energia e pelos sinais. Não use números de chave soltos.
+  O relé MEMS por célula (`rele_mems`) é **premissa aceita pelo dono**
+  (2026-10-28): não troque sem perguntar.
 - Os testes da netlist real usam o fixture `netlist_real` de `tests/conftest.py`.
 
 Resultados atuais (confira rodando, não confie nestes números):
