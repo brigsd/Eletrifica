@@ -31,18 +31,32 @@ def test_protocolos_basicos():
     assert PROTOCOLOS["DDR5-4800"].bidirecional and not PROTOCOLOS["PCIe5"].bidirecional
 
 
+def _lider(plano, controlador="GPU"):
+    return next(e.id for e in plano.enlaces if e.id.startswith(f"{controlador}-MEM")
+                and plano.canais[e.canais[0]].rank == 0)
+
+
 def test_todas_as_interfaces_roteadas(plano):
     ids = {e.id for e in plano.enlaces}
-    assert {"CPU-DIMM0", "CPU-DIMM1", "CPU-GPU", "CPU-PCH", "CPU-FPGA"} <= ids
-    assert {f"GPU-MEM{i}" for i in range(12)} <= ids
+    assert {"CPU-DIMM", "CPU-PONTE", "CPU-GPU", "CPU-PCH", "CPU-FPGA"} <= ids
+    assert {f"GPU-MEM{i}" for i in range(24)} <= ids and {f"PONTE-MEM{i}" for i in range(24)} <= ids
     assert all(c.fibra >= 0 for c in plano.canais)
-    # cada canal DDR5 da CPU foi para um DIMM diferente, cada canal GDDR7 para um chip diferente
-    origens = {plano.canais[plano.enlace(f"CPU-DIMM{i}").canais[0]].pino_origem[:6]
-               for i in (0, 1)}
+    # um canal DDR5 da CPU vai para o DIMM e o outro para a ponte do banco
+    origens = {plano.canais[plano.enlace(e).canais[0]].pino_origem[:6] for e in ("CPU-DIMM", "CPU-PONTE")}
     assert origens == {"DDR5_A", "DDR5_B"}
-    gs = {plano.canais[plano.enlace(f"GPU-MEM{i}").canais[0]].pino_origem.split("_")[0]
-          for i in range(12)}
-    assert len(gs) == 12
+    # cada canal GDDR7 da GPU atende dois chips vizinhos, e a ponte fala com os mesmos
+    from collections import Counter
+    gs = Counter(plano.canais[plano.enlace(f"GPU-MEM{i}").canais[0]].pino_origem.split("_")[0]
+                 for i in range(24))
+    assert len(gs) == 12 and set(gs.values()) == {2}
+    for i in range(24):
+        g, p = (plano.canais[plano.enlace(f"{c}-MEM{i}").canais[0]] for c in ("GPU", "PONTE"))
+        assert (g.canal_mem, g.rank, g.lider) == (p.canal_mem, p.rank, p.lider)
+    # o rank 1 usa a luz do rank 0: não ganha fibra própria
+    for c in plano.canais:
+        if c.sombra_de >= 0:
+            l = plano.canais[c.sombra_de]
+            assert (c.fibra, c.lambda_idx, c.pino_origem) == (l.fibra, l.lambda_idx, l.pino_origem)
 
 
 def test_contagem_bate_com_pinagem(plano):
@@ -51,10 +65,11 @@ def test_contagem_bate_com_pinagem(plano):
     sinais_cpu = sum(1 for k in ("DDR5_A", "DDR5_B", "PEG", "DMI", "PCIE4", "AUX")
                      for n in cpu.interfaces[k].sinais if not relogio(n))
     sinais_gpu = len(obter("GPU").interfaces["GDDR7"].sinais)
+    sinais_ponte = len(obter("PONTE-MEM").interfaces["GDDR7"].sinais)
     pinos = {(c.origem, c.pino_origem) for c in plano.canais}
-    assert len(pinos) == sinais_cpu + sinais_gpu
-    # comutado: um canal por pino
-    assert len(plano.canais) == len(pinos)
+    assert len(pinos) == sinais_cpu + sinais_gpu + sinais_ponte
+    # comutado: um canal por pino, mais um por chip de rank 1 (que divide a luz do rank 0)
+    assert len(plano.canais) == len(pinos) + sum(c.sombra_de >= 0 for c in plano.canais)
 
 
 def test_dmi_vai_ao_pch_pcie4_ao_fpga_e_relogio_fica_fora(plano):
@@ -94,7 +109,8 @@ def test_grupos_de_byte_numa_fibra_so(cfg):
 ])
 def test_gddr7_384_pinos(cfg, modo, topologia, canais, fibras):
     p = rotear(cfg, modo_bidirecional=modo, topologia=topologia)
-    dq = [c for c in p.canais if c.protocolo == "GDDR7-32" and c.papel == "DQ"]
+    dq = [c for c in p.canais if c.protocolo == "GDDR7-32" and c.papel == "DQ" and c.origem == "GPU"
+          and c.sombra_de < 0]
     assert len(dq) == canais
     assert len({c.fibra for c in dq}) == fibras
     banda = sum(c.taxa_gbps for c in dq if c.sentido != "volta") / 8
@@ -103,7 +119,7 @@ def test_gddr7_384_pinos(cfg, modo, topologia, canais, fibras):
 
 def test_latencia_e_comutacao(plano):
     L = calcular(plano)
-    ddr = L.enlace("CPU-DIMM0")
+    ddr = L.enlace("CPU-DIMM")
     assert 100 < ddr.atraso_dados_ps < 1000
     assert ddr.treinavel
     assert ddr.comutacao["decodificacao_escondida"]
@@ -116,15 +132,15 @@ def test_rajadas_em_canal_ideal(cfg, modo):
     p = rotear(cfg, modo_bidirecional=modo)
     for op in ("escrita", "leitura"):
         d = os.urandom(64)
-        r = E.rajada_ddr5(p, "CPU-DIMM1", op, d, subcanal="B")
+        r = E.rajada_ddr5(p, "CPU-PONTE", op, d, subcanal="B")
         assert r.ok and r.recebidos == d and r.sentido_decodificado == op
         g = os.urandom(48)
-        r = E.rajada_gddr7(p, "GPU-MEM5", op, g)
+        r = E.rajada_gddr7(p, _lider(p), op, g)
         assert r.ok and r.recebidos == g
 
 
 def test_comando_corrompido_perde_a_rajada(plano):
-    r = E.rajada_ddr5(plano, "CPU-DIMM0", "escrita", os.urandom(64),
+    r = E.rajada_ddr5(plano, "CPU-DIMM", "escrita", os.urandom(64),
                       modelo=E.canal_ideal(0.3, semente=1))
     assert r.sentido_decodificado == "invalido"
     assert r.erros_bits > 0
@@ -132,16 +148,16 @@ def test_comando_corrompido_perde_a_rajada(plano):
 
 def test_treinamento_converge_e_quebra_se_o_caminho_muda(cfg, plano):
     L = calcular(plano)
-    t = E.treinar(plano, L, "CPU-DIMM0")
+    t = E.treinar(plano, L, "CPU-DIMM")
     assert t.convergiu and len(t.pistas) == 64
     assert E.verificar(t, plano, L)["falhas"] == 0
 
     movido = copy.deepcopy(cfg)
-    movido.por_nome("DIMM0").y += 25.0
+    movido.por_nome("DIMM").y += 25.0
     p2 = rotear(movido)
     L2 = calcular(p2)
     assert E.verificar(t, p2, L2)["falhas"] == len(t.pistas)
-    assert E.treinar(p2, L2, "CPU-DIMM0").convergiu
+    assert E.treinar(p2, L2, "CPU-DIMM").convergiu
 
 
 def test_treinamento_gddr7(plano):

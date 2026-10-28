@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 
 from modulos.dados import comandos as CMD
 from modulos.dados import ddr5 as DDR5
+from modulos.dados import memoria_unificada as MU
 from modulos.dados import pcie as PC
 from modulos.conexoes.verificador import REGIOES_FIRMWARE
 
@@ -51,6 +52,8 @@ PADRAO = {
     "treino_memoria_us": 200_000.0,
     "treino_pcie_us": 100_000.0,
     "treino_gddr7_us": 50_000.0,
+    "sondas_banco_us": 100.0,          # kernel de calibração da GPU e sondas da CPU
+    "calibracao_banco_us": None,       # None = varredura do banco pela ponte
 }
 
 PASSIVOS_OPTICOS = {"fibra", "divisor", "acoplador", "mux", "demux"}
@@ -717,6 +720,37 @@ def _executar(nl, cfg, top, ex):
     etapa("PCIe e GDDR7", t_fim, "funcoes",
           "Enlace PCIe até a GPU e treino da GDDR7 em PAM3." if pcie or g7 else "Sem PCIe nem GDDR7 nesta montagem.",
           energizadas=todas, enlaces=enlaces)
+
+    # ---- 16. banco unificado ------------------------------------------------------------
+    ponte = next((b for b in nl.por_tipo("controlador")
+                  if "DIMM-emulado" in b.atributos.get("capacidades", ())), None)
+    if ponte is not None:
+        exigir("Banco unificado", "memoria-compartilhada", sorted(set(cpus) | set(pecas_com("raiz-PCIe"))))
+        if t_alimentado(ponte.id) is None:
+            raise _Parou("Banco unificado", f"a lógica da ponte ({ponte.id}) está sem alimentação",
+                         next((m for p in top.portas(ponte.id, "energia", ("entra",)) for m in motoristas(p)),
+                              ponte.id))
+        if not ({top.rede("controle", p) for p in top.portas(ponte.id, "controle")} & rede_fpga):
+            raise _Parou("Banco unificado", f"a ponte não tem controle até o {fpga}", ponte.id)
+        exigir("Banco unificado", "posse-do-banco", pecas_com("posse-do-banco"))
+        for m in nl.por_tipo("mux_dono"):
+            if m.pai not in t_trava:
+                raise _Parou("Banco unificado", f"o mux de posse {m.id} está num tradutor que não travou", m.pai)
+        a = ponte.atributos
+        t_cal = cfg["calibracao_banco_us"] or MU.tempo_calibracao_us(a["chips"], a["chip_real_gb"])
+        t_banco = t_fim + cfg["sondas_banco_us"] + t_cal
+        ex.evento(t_fim + cfg["sondas_banco_us"], ponte.id, "sondas gravadas",
+                  f"{MU.BITS_M + 3} sondas da GPU e {MU.BITS_L} da CPU")
+        ex.evento(t_banco, ponte.id, "mapas aprendidos", "varredura do banco e conferência por sondas aleatórias")
+        for r in range(a["ranks"]):
+            ex.evento(t_banco, f"rank {r}", "posse da GPU", f"{a['canais']} chips")
+        enlaces.add("BANCO")
+        t_fim = t_banco
+        etapa("Banco unificado", t_fim, "funcoes",
+              f"A ponte aprende os mapas de endereço da GPU e da CPU por sondas e varre o banco em "
+              f"{_ms(t_cal)}; o {peca_fpga} dá os {a['ranks']} ranks à GPU. A CPU vê os "
+              f"{a['janela_gb']:.0f} GB como um DIMM de CL{a['cl_declarado']}; a GPU, como a VRAM dela.",
+              energizadas=todas, enlaces=enlaces)
     ex.evento(t_fim, "sistema", "pronto")
     etapa("Pronto", t_fim, "temperatura", f"Sistema ligado em {_ms(t_fim)}.",
           energizadas=todas, enlaces=enlaces)

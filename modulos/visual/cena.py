@@ -23,13 +23,17 @@ DESCRICAO = {
     "i5-13600KF": "Processador. Mantém o controle e fala os protocolos nativos (DDR5 e "
                   "PCIe). Recebe o núcleo de até 200 A por centenas de células de energia, "
                   "vindas do regulador multifásico ao lado.",
-    "DDR5-DIMM": "Memória principal. Recebe 5 V estáveis e o regulador interno do módulo "
-                 "(PMIC) faz o ajuste fino. Os 94 sinais do canal vão por luz até a CPU.",
+    "DDR5-DIMM": "Memória só da CPU, num canal. Recebe 5 V estáveis e o regulador interno do "
+                 "módulo (PMIC) faz o ajuste fino. Os 94 sinais do canal vão por luz até a CPU.",
     "GPU": "Placa de vídeo. A potência do núcleo chega pelo cabo da fonte; pela base "
            "passam terra, 3,3 V auxiliar e os sinais: PCIe 5.0 x16 até a CPU e 384 bits "
-           "de GDDR7 até os chips de memória.",
-    "GDDR7": "Chip de memória de vídeo, 32 bits a 32 Gb/s por pino em PAM3. Cada pino de "
-             "dados ganha seu próprio canal óptico até a GPU.",
+           "de GDDR7 até o banco unificado, que ela enxerga como 12 chips de 32 Gb.",
+    "GDDR7": "Chip do banco unificado, 32 bits a 32 Gb/s por pino em PAM3. Faz par com o "
+             "vizinho: a GPU vê os dois como um chip só, e o seletor do par escolhe quem "
+             "responde. A CPU chega aos mesmos chips pela ponte; um dono de cada vez.",
+    "PONTE-MEM": "Ponte do banco unificado. Para a CPU é um DIMM DDR5 de 48 GB com CL maior; "
+                 "do outro lado tem 12 portas GDDR7 até os chips do banco e grava no layout "
+                 "que a GPU vai ler, com os mapas de endereço aprendidos no boot.",
     "FPGA": "Orquestrador da base. Sonda as células, identifica as peças, configura cada "
             "célula e os chips tradutores, liga os reguladores e conversa com o PCH por "
             "RSMRST#, SLP_S3#, SYS_PWROK e SMBus.",

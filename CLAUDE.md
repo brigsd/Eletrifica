@@ -32,6 +32,8 @@ arquivo junto** — é ele que segura o contexto entre sessões e entre agentes.
 - Quando não entender algo, **pergunte de forma simples**.
 - No projeto de simulação, não gaste texto justificando limites de simulação
   contra teste de bancada.
+- Isto é um **laboratório**: quando uma restrição aparece, resolva no projeto.
+  Não troque o conceito por um conjunto de produtos prontos.
 
 ## Identidade do repositório
 
@@ -145,10 +147,12 @@ Dependências em `requirements.txt`, mais o `kicad-cli` do KiCad 7+.
 
 ## Projeto `interconexao-optica`
 
-Emulador de uma base modular que substitui a placa-mãe: CPU i5-13600KF, 2 DDR5,
-GPU com 12 chips GDDR7, um chipset Intel B760 (PCH) e um FPGA, 18 peças
-encaixadas em qualquer posição e giro sobre células
-chaveadas; dados por fibra óptica. O conceito do dono está em
+Emulador de uma base modular que substitui a placa-mãe: CPU i5-13600KF, 1 DDR5,
+a ponte do banco (PONTE-MEM), GPU, 24 chips GDDR7, um chipset Intel B760 (PCH) e
+um FPGA, 30 peças encaixadas em qualquer posição e giro sobre células
+chaveadas; dados por fibra óptica. **O centro do conceito é a memória
+compartilhada** (dono, 2026-10-28): CPU e GPU na mesma memória, como num Apple
+Silicon, com peças comuns. O conceito do dono está em
 `projetos/interconexao-optica/docs/conceito.md` (cópia do documento
 <https://claude.ai/artifact/3NMHV7qQad9bxKu82cApAJ>).
 
@@ -157,7 +161,7 @@ as decisões de projeto) e `enlace.json` (parâmetros ópticos). Tudo o mais é
 gerado por:
 
 ```bash
-python3 -m modulos.sistema.simular    # ~30 s: docs/resultados.md, docs/*.svg, web/
+python3 -m modulos.sistema.simular    # ~2,5 min: docs/resultados.md, docs/*.svg, web/
 ```
 
 Regras do modelo:
@@ -172,7 +176,7 @@ Regras do modelo:
 - **Nada é conectado por mágica.** `modulos/conexoes/construir.py` monta a
   netlist com cada salto de cada sinal (célula, trilha, chip tradutor, laser,
   fibra, receptor, driver), mais energia, controle e relógio de cada bloco.
-  `verificador.py` confere 18 regras (R13 temperatura e R14 consumo usam o
+  `verificador.py` confere 20 regras (R13 temperatura e R14 consumo usam o
   contexto de `contexto.py`, montado da simulação térmica e de energia);
   `modulos/sistema/boot.py` liga o sistema
   como máquina de estados sobre essa netlist. Um módulo novo que crie
@@ -186,6 +190,15 @@ Regras do modelo:
   (`modulos/dados/comandos.py`): sentido dos bidirecionais e MRW de terminação e
   força, que ele espelha (`ddr5.py`). O PCIe tem detecção de receptor controlada
   pelo FPGA e LTSSM/equalização em `pcie.py`. Regras R15–R17.
+- **Banco unificado** (`memoria: unificada` em `montagem.json`;
+  `modulos/dados/memoria_unificada.py`). A GPU só tem uma porta rápida, a de
+  memória; o PCIe é o gargalo do offloading. Cada canal da GPU atende dois
+  chips vizinhos (a GPU vê um de 32 Gb): no roteamento o rank 1 é `sombra_de`
+  do rank 0 e usa a mesma luz; no tradutor sob o rank 0 ficam o mux de posse
+  (GPU ou ponte) e o seletor de rank (qual chip), com linha de atraso. A ponte é
+  peça do catálogo (PONTE-MEM): para a CPU é um DIMM de 48 GB com CL maior no
+  SPD; ela aprende os mapas de endereço no boot (XOR de bits, e resto por 3 nos
+  12 canais). Regras R19 (posse) e R20 (banco); etapa "Banco unificado" no boot.
 - **Contato imperfeito** (`modulos/sistema/defeitos.py`) altera a verdade antes
   da sondagem; peça recusada ou desconhecida não liga célula nenhuma.
 - Dois relatórios à parte, mais lentos, regenerados à mão:
@@ -201,24 +214,27 @@ premissa física do modelo, confira nesse documento se o valor é realista.
 
 Resultados atuais (confira rodando, não confie nestes números):
 
-- 18/18 peças identificadas, erro de µm, em qualquer giro (o ângulo sai do
+- 30/30 peças identificadas, erro de µm, em qualquer giro (o ângulo sai do
   retângulo de área mínima das células em contato).
 - O PCH é peça própria: gera os relógios, sequencia a energia, lê o ME e a BIOS
   da flash. O FPGA só orquestra a base (células, tradutores, lasers).
-- Memória compartilhada via CXL **não** fecha: nem a CPU nem a GPU suportam
-  CXL (R18, aviso). A alternativa modelada é ReBAR pelo PCIe.
-- Conceito como estava: ~2.800 erros no verificador. Com as decisões de
+- Memória compartilhada **fecha pelo banco unificado** (sem CXL nas peças):
+  48 GB que a GPU lê a 1,5 TB/s e a CPU lê como RAM (~96 ns). A emulação confere
+  bit a bit CPU → GPU e GPU → CPU. LLM de 70B em 4 bits: teto ~38 tokens/s,
+  contra ~4,5 do offload de um PC comum.
+- Conceito como estava: ~8.900 erros no verificador. Com as decisões de
   `montagem.json` (tradutor sob a peça, relé MEMS na célula, plano de 2 oz,
   placa fria sob a base com vias térmicas em 5 % da área): 0 erros, e o boot
-  emulado fica pronto em ~490 ms. Placa fria e vias térmicas: aceitas pelo dono
+  emulado fica pronto em ~540 ms. Placa fria e vias térmicas: aceitas pelo dono
   (2026-10-28) desde que funcionem na prática; sem as vias, não fecham.
 - Os números realistas de `docs/viabilidade.md` já estão no modelo: anel de
   25 pm/V, 2,5 pJ/bit por lado no tradutor, canais a ~200 GHz e ReBAR a
   ~1.200 ns. Em `enlace.json`, `anel` e `filtro` de uma configuração mesclam
   com os de `comum`.
-- A interconexão dissipa ~118 W dentro da base; só com ar a base chega a
-  ~255 °C. Com a placa fria, ~67 °C. Consumo ~130 W, ~8,8 pJ/bit: acima dos
-  ~6,3 de uma ligação elétrica (aviso R14).
+- A interconexão dissipa ~149 W dentro da base; só com ar a base chega a
+  ~267 °C. Com a placa fria, ~64 °C. Consumo ~166 W, ~11 pJ/bit: acima dos
+  ~6,3 de uma ligação elétrica (aviso R14). Os lasers dos caminhos da ponte
+  ficam acesos o tempo todo (pior caso).
 - 64 λ por fibra **não fecha** no modelo físico (diafonia); a configuração
   `viavel` (16 λ/fibra a ~200 GHz, anel de raio 3,5 µm, 4 canais por laser) dá
   ~+1,3 dB em PAM3. Com 1 laser para cada 2 canais iria a ~+4,3 dB.

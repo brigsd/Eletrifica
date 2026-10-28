@@ -17,9 +17,11 @@ from scipy.optimize import linear_sum_assignment
 from modulos.conexoes.netlist import Netlist, Requisito, Sinal
 from modulos.conexoes.padroes import PADROES, padrao_do_pino
 from modulos.conexoes.posicao import Ocupacao, manhattan
-from modulos.conexoes.verificador import REGIOES_FIRMWARE
+from modulos.conexoes.verificador import REGIOES_FIRMWARE, atraso_caminho_ps
 from modulos.dados import comandos as CMD
 from modulos.dados import ddr5 as DDR5
+from modulos.dados import memoria_unificada as MU
+from modulos.dados.protocolos import PROTOCOLOS
 from modulos.optica import enlace as E
 from modulos.sistema.celula import Chave, chave as chave_da_celula
 
@@ -63,7 +65,8 @@ CHAVE_COMUTACAO_PS = 300.0     # troca de sentido de um pino bidirecional
 SQUELCH_PS = 4000.0            # ocioso elétrico do PCIe atravessando a luz
 TERMINACAO_TRADUTOR_OHM = (34.0, 40.0, 48.0, 60.0, 80.0, 120.0, 240.0, None)   # None = aberto
 FORCA_TRADUTOR_OHM = (34.0, 40.0, 48.0)
-CONTROLADORES_DE_MEMORIA = ("i5-13600KF", "GPU")
+CONTROLADORES_DE_MEMORIA = ("i5-13600KF", "GPU", "PONTE-MEM")
+PS_POR_MM_TRILHA = PROTOCOLOS["GDDR7-32"].ps_por_mm_trilha
 
 # plataforma Intel: o chipset (PCH) gera os relógios, sequencia a energia e lê a flash
 REGIOES_FLASH = ("descritor", "ME", "BIOS")      # o que a imagem da flash carrega
@@ -77,7 +80,12 @@ HANDSHAKE_PCH = (("RSMRST_IN", "ida"), ("SYS_PWROK", "ida"), ("SLP_S3_OUT", "vol
 SPI_PCH = (("SPI_CLK", "spi_clk", "ida"), ("SPI_CS0", "spi_cs", "ida"), ("SPI_MOSI", "spi_mosi", "ida"),
            ("SPI_MISO", "spi_miso", "volta"))
 PADRAO_SPI = "CMOS-1V8"
-OPCIONAL_CXL = "memoria-compartilhada-CXL"
+OPCIONAL_MEMORIA = "memoria-compartilhada"
+
+# banco unificado (modulos.dados.memoria_unificada): seletor de rank, posse e ponte
+MUX_DONO_PS = 20.0             # chave estática: só vira na troca de dono
+POTENCIA_COMUTADOR_W = 0.002
+LATENCIA_RANK_PS = 200.0       # comando e banco do primeiro ciclo até o chip escolhido
 
 # constantes que construir(..., parametros={...}) pode sobrepor numa chamada
 PARAMETROS = ("VIAS_MAX", "CHIP_MM", "AFASTAMENTO_CHIP_MM", "VDD_CHIP_V", "PJ_BIT_TX", "PJ_BIT_RX",
@@ -85,7 +93,8 @@ PARAMETROS = ("VIAS_MAX", "CHIP_MM", "AFASTAMENTO_CHIP_MM", "VDD_CHIP_V", "PJ_BI
               "PERDA_DB_MM_GHZ", "CAMADAS_SINAL", "PASSO_TRILHA_MM", "LASER_EFICIENCIA", "LASER_TEC_W",
               "DIVISOR_SAIDAS_MAX", "PERDA_FIBRA_DB_MM", "PERDA_CONECTOR_DB",
               "DISPOSITIVOS_POR_I3C", "CELULAS_POR_MATRIZ", "MARGEM_REGULADOR", "PULLUP_OHM",
-              "CHAVE_COMUTACAO_PS", "SQUELCH_PS", "TERMINACAO_TRADUTOR_OHM", "FORCA_TRADUTOR_OHM")
+              "CHAVE_COMUTACAO_PS", "SQUELCH_PS", "TERMINACAO_TRADUTOR_OHM", "FORCA_TRADUTOR_OHM",
+              "MUX_DONO_PS", "LATENCIA_RANK_PS")
 
 DIREITO = {"ida": "sai", "volta": "entra", "duplo": "bidir"}
 INVERSO = {"ida": "entra", "volta": "sai", "duplo": "bidir"}
@@ -136,6 +145,10 @@ class _Construtor:
         self.lambdas_tx = defaultdict(lambda: defaultdict(int))   # chip -> λ -> vias tx
         self.ca_fontes = defaultdict(list)         # (chip, (enlace, subcanal)) -> pontos do CA
         self.aux_alvos = {}
+        self.seletores = defaultdict(list)         # chip do rank 0 -> seletores de rank do grupo
+        self.ca_par = defaultdict(set)             # chip do rank 0 -> onde o detector lê o CA
+        self.ponte = next((n for n, p in self.pecas.items() if p.tipo == "PONTE-MEM"), None)
+        self.ranks = 1 + max((c.rank for c in plano.canais), default=0)
 
     # ------------------------------------------------------------------ util
     def _pino_xy(self, peca, nome):
@@ -390,23 +403,48 @@ class _Construtor:
         vias = defaultdict(lambda: defaultdict(int))      # peca -> fibra -> vias
         tensao = {}
         pontos = defaultdict(list)                        # (peca, fibra) -> posições dos pinos
+        fibras_do_pino = defaultdict(set)                 # (peca, pino) -> fibras
+        canais_do_pino = defaultdict(int)
         for i in self.rapidos:
             c = canais[i]
+            if c.sombra_de >= 0:          # usa a luz do chip do rank 0: não pede via
+                continue
             for lado, peca, pino in (("a", c.origem, c.pino_origem), ("b", c.destino, c.pino_destino)):
+                canais_do_pino[(peca, pino)] += 1
                 tx, rx = self._papeis(c, lado)
                 vias[peca][c.fibra] += tx + rx
                 tensao[(peca, c.fibra)] = PADROES[self._padrao(peca, pino)].tensao_v
                 pontos[(peca, c.fibra)].append(self._pino_xy(peca, pino))
+                fibras_do_pino[(peca, pino)].add(c.fibra)
+        self.multi = dict(canais_do_pino)
+        # um pino com canais em várias fibras (rank, ou dois controladores) amarra as fibras
+        # ao mesmo chip: a trilha dele chega a um chip só
+        grupo_da_fibra = {}
+        for (peca, _), fs in fibras_do_pino.items():
+            fs = sorted(fs)
+            raiz = [grupo_da_fibra.get((peca, f), (peca, f)) for f in fs]
+            alvo = min(raiz)
+            for k, v in list(grupo_da_fibra.items()):
+                if v in raiz:
+                    grupo_da_fibra[k] = alvo
+            for f in fs:
+                grupo_da_fibra[(peca, f)] = alvo
         self.chip_de = {}
         self.chips_da_peca = defaultdict(list)
         # peças com menos vias escolhem lugar primeiro (as GDDR7 antes da GPU)
         for peca, por_fibra in sorted(vias.items(), key=lambda kv: (sum(kv[1].values()), kv[0])):
             pc = self.pecas[peca]
+            juntas = defaultdict(list)
+            for f in por_fibra:
+                juntas[grupo_da_fibra.get((peca, f), (peca, f))].append(f)
             grupos = defaultdict(list)
-            for f, n in por_fibra.items():
-                cx, cy = np.mean(pontos[(peca, f)], axis=0)
+            for fs in juntas.values():
+                n = sum(por_fibra[f] for f in fs)
+                if n > VIAS_MAX:
+                    raise RuntimeError(f"{peca}: {n} vias amarradas num chip só, cabem {VIAS_MAX}")
+                cx, cy = np.mean([q for f in fs for q in pontos[(peca, f)]], axis=0)
                 angulo = math.atan2(cy - pc.y, cx - pc.x)
-                grupos[tensao[(peca, f)]].append((angulo, n, f))
+                grupos[tensao[(peca, fs[0])]].append((angulo, n, tuple(sorted(fs))))
             k = 0
             caixas_peca = []
             for v, lista in sorted(grupos.items()):
@@ -416,14 +454,14 @@ class _Construtor:
                 n_chips = math.ceil(total / VIAS_MAX)
                 alvo_por_chip = total / n_chips
                 caixas = [[0, []]]
-                for _, n, f in lista:
+                for _, n, fs in lista:
                     cx = caixas[-1]
                     if cx[1] and (cx[0] + n > VIAS_MAX or
                                   (cx[0] >= alvo_por_chip and len(caixas) < n_chips)):
                         caixas.append([0, []])
                         cx = caixas[-1]
                     cx[0] += n
-                    cx[1].append(f)
+                    cx[1].extend(fs)
                 for usadas, fs in caixas:
                     centro = np.mean([q for f in fs for q in pontos[(peca, f)]], axis=0)
                     caixas_peca.append((v, tuple(centro), fs))
@@ -669,9 +707,12 @@ class _Construtor:
         canais = self.plano.canais
         self.chave = {}                  # (peca, pino) -> (chave, via_tx, via_rx)
         self.ca_por_chave = defaultdict(list)
+        self.sinal_do_canal = {}
         trilhas_do_grupo = defaultdict(set)      # (enlace, grupo, peca) -> trilhas
         for i in self.rapidos:
             c = canais[i]
+            if c.sombra_de >= 0:
+                continue
             f = c.fibra
             paradas = self.cadeia[f]
             idx = {p[0]: k for k, p in enumerate(paradas)}
@@ -685,8 +726,12 @@ class _Construtor:
                 tid = self.pino(peca, pino, sentido_pino, pad)
                 chip = self.chip_de[(peca, f)]
                 self._ate_chip(tid, chip)
+                ponta, elos = (tid, "b"), []
+                if lado == "b" and c.canal_mem:
+                    ponta, elos = self._lado_banco(c, peca, pino, pad, tid, chip)
+                interno = "interno" if elos else "trilha"
                 t, r = self._papeis(c, lado)
-                atv = 0.5 if c.sentido == "duplo" else 1.0       # tx e rx se alternam
+                atv = (0.5 if c.sentido == "duplo" else 1.0) * self._atividade(c)   # tx e rx se alternam
                 vtx = self._via(chip, "t", pad, c.lambda_idx, c.taxa_gbps, atv) if t else None
                 vrx = self._via(chip, "r", pad, c.lambda_idx, c.taxa_gbps, atv) if r else None
                 ch = None
@@ -705,30 +750,37 @@ class _Construtor:
                     nl.porta(ch, "tx", "eletrico", "sai", padrao=pad)
                     nl.porta(ch, "rx", "eletrico", "entra", padrao=pad)
                     nl.porta(ch, "sentido", "controle", "entra")
-                    nl.ligar((tid, "b"), (ch, "pino"), "trilha")
+                    nl.ligar(ponta, (ch, "pino"), interno)
                     nl.ligar((ch, "tx"), (vtx, "e"), "interno")
                     nl.ligar((vrx, "e"), (ch, "rx"), "interno")
                     self.ca_por_chave[chip].append((ch, c.enlace, c.grupo.rsplit("_", 1)[0]))
                 elif vtx:
-                    nl.ligar((tid, "b"), (vtx, "e"), "trilha")
+                    nl.ligar(ponta, (vtx, "e"), interno)
                 else:
-                    nl.ligar((vrx, "e"), (tid, "b"), "trilha")
+                    nl.ligar((vrx, "e"), ponta, interno)
                 if prot.startswith("PCIe"):
                     if vtx:
                         nl.blocos[vtx].atributos.update(deteccao_receptor="controlada",
                                                         transferencia="anel, não linear")
                     if vrx:
                         nl.blocos[vrx].atributos.update(squelch_ps=SQUELCH_PS)
-                pontas[lado] = dict(peca=peca, pino=pino, tid=tid, vtx=vtx, vrx=vrx, ch=ch, chip=chip)
+                pontas[lado] = dict(peca=peca, pino=pino, tid=tid, vtx=vtx, vrx=vrx, ch=ch, chip=chip,
+                                    elos=elos)
                 trilhas_do_grupo[(c.enlace, c.grupo, peca)].add(tid)
                 if c.papel in ("CA", "CS", "CK"):
                     chave_grupo = (c.enlace, c.grupo.rsplit("_", 1)[0])
                     ponto = (tid, "b") if lado == "a" else (vrx, "e")
                     self.ca_fontes[(chip, chave_grupo)].append(ponto)
+                    if lado == "b" and c.canal_mem and c.papel == "CA":
+                        # o detector de rank lê o comando de quem é dono agora: depois do mux
+                        mux = next((b for b, _, _ in elos if nl.blocos[b].tipo == "mux_dono"), None)
+                        self.ca_par[peca].add((mux, "pino") if mux else (vrx, "e"))
 
             def eletrico_tx(p):
                 cam = [(f"{p['peca']}:{p['pino']}", "e"), (f"cel:{p['peca']}:{p['pino']}", "pino"),
                        (f"cel:{p['peca']}:{p['pino']}", "base"), (p["tid"], "a"), (p["tid"], "b")]
+                for b, fora, dentro in p["elos"]:
+                    cam += [(b, fora), (b, dentro)]
                 if p["ch"]:
                     cam += [(p["ch"], "pino"), (p["ch"], "tx")]
                 return cam + [(p["vtx"], "e")]
@@ -737,6 +789,8 @@ class _Construtor:
                 cam = [(p["vrx"], "e")]
                 if p["ch"]:
                     cam += [(p["ch"], "rx"), (p["ch"], "pino")]
+                for b, fora, dentro in reversed(p["elos"]):
+                    cam += [(b, dentro), (b, fora)]
                 return cam + [(p["tid"], "b"), (p["tid"], "a"), (f"cel:{p['peca']}:{p['pino']}", "base"),
                               (f"cel:{p['peca']}:{p['pino']}", "pino"), (f"{p['peca']}:{p['pino']}", "e")]
 
@@ -757,8 +811,116 @@ class _Construtor:
             if c.sentido == "duplo":
                 s.caminhos["volta"] = caminho(dest, orig)
             nl.sinal(s)
+            self.sinal_do_canal[i] = sid
+        self._sombras(trilhas_do_grupo)
         self._casar_comprimentos(trilhas_do_grupo)
+        self._alinhar_ranks()
         self._detectores()
+        self._detectores_rank()
+
+    def _atividade(self, c):
+        """Fração do tempo em que o caminho carrega dados. O tradutor do grupo leva o canal
+        inteiro (só um chip responde de cada vez); a ponte só leva o que o canal DDR5 da CPU dá."""
+        if c.canal_mem and c.origem == self.ponte:
+            return MU.BANDA_CANAL_DDR5_GBPS / (MU.CANAIS_GPU * MU.BANDA_CANAL_GPU_GBPS)
+        return 1.0
+
+    def _lado_banco(self, c, peca, pino, pad, tid, chip):
+        """Do pino do chip para fora: seletor de rank (os chips do grupo) e mux de posse
+        (os controladores). Devolve onde a via ou a chave de sentido se liga, e os elos
+        (bloco, porta do lado do pino, porta do lado do controlador)."""
+        nl = self.nl
+        elos, base = [], (tid, "b")
+        if self.ranks > 1:
+            sid = f"sel:{peca}:{pino}"
+            if sid not in nl.blocos:
+                nl.bloco(sid, "seletor_rank", nl.blocos[chip].posicao, pai=chip, peca=peca, pino=pino,
+                         papel=c.papel, atraso_ps=MU.SELETOR_CA_PS if c.papel in ("CA", "CK", "WCK")
+                         else MU.SELETOR_DQ_PS, ranks=self.ranks, chips=[peca],
+                         passo_alinhamento_ps=MU.PASSO_ALINHAMENTO_PS,
+                         faixa_alinhamento_ps=MU.FAIXA_ALINHAMENTO_PS,
+                         latencia_declarada_extra_ps=MU.RL_EXTRA_PS)
+                nl.porta(sid, "pino", "eletrico", "bidir", padrao=pad)
+                nl.porta(sid, "r0", "eletrico", "bidir", padrao=pad)
+                nl.porta(sid, "sel", "controle", "entra")
+                nl.ligar((tid, "b"), (sid, "r0"), "trilha")
+                self.seletores[peca].append(sid)
+                nl.blocos[chip].atributos["potencia_w"] += POTENCIA_COMUTADOR_W
+            elos.append((sid, "r0", "pino"))
+            base = (sid, "pino")
+        if self.multi.get((peca, pino), 1) > 1:
+            mid = f"mux:{peca}:{pino}"
+            if mid not in nl.blocos:
+                nl.bloco(mid, "mux_dono", nl.blocos[chip].posicao, pai=chip, peca=peca, pino=pino,
+                         papel=c.papel, atraso_ps=MUX_DONO_PS, controladores=[])
+                nl.porta(mid, "pino", "eletrico", "bidir", padrao=pad)
+                nl.porta(mid, "sel", "controle", "entra")
+                nl.ligar(base, (mid, "pino"), "interno" if elos else "trilha")
+                nl.ligar((chip, "ctl"), (mid, "sel"), "interno")      # a posse vem do FPGA
+                nl.blocos[chip].atributos["potencia_w"] += POTENCIA_COMUTADOR_W
+            b = nl.blocos[mid]
+            j = len(b.atributos["controladores"])
+            b.atributos["controladores"].append(c.origem)
+            nl.porta(mid, f"r{j}", "eletrico", "bidir", padrao=pad)
+            elos.append((mid, "pino", f"r{j}"))
+            return (mid, f"r{j}"), elos
+        return base, elos
+
+    def _sombras(self, trilhas_do_grupo):
+        """Os chips de rank > 0: a mesma luz do chip do rank 0, outra porta do seletor e a trilha
+        curta até o chip vizinho."""
+        nl = self.nl
+        canais = self.plano.canais
+        for i in self.rapidos:
+            c = canais[i]
+            if c.sombra_de < 0:
+                continue
+            c0 = canais[c.sombra_de]
+            s0 = nl.sinais[self.sinal_do_canal[c.sombra_de]]
+            pad = self._padrao(c.destino, c.pino_destino)
+            sentido_pino = INVERSO[c.sentido]
+            chip = self.chip_de[(c0.destino, c0.fibra)]
+            tid = self.pino(c.destino, c.pino_destino, sentido_pino, pad)
+            sel = f"sel:{c0.destino}:{c0.pino_destino}"
+            porta = f"r{c.rank}"
+            if porta not in nl.blocos[sel].portas:
+                self._ate_chip(tid, chip)
+                nl.porta(sel, porta, "eletrico", "bidir", padrao=pad)
+                nl.ligar((tid, "b"), (sel, porta), "trilha")
+                nl.blocos[sel].atributos["chips"].append(c.destino)
+            trilhas_do_grupo[(c.enlace, c.grupo, c.destino)].add(tid)
+            # o caminho do rank 0, trocando só o trecho do seletor até o pino do chip
+            velho, novo = f"{c0.destino}:{c0.pino_destino}", f"{c.destino}:{c.pino_destino}"
+            troca = {(sel, "r0"): (sel, porta), (velho, "e"): (novo, "e")}
+            for prefixo, portas in (("cel:", ("base", "pino")), ("tr:", ("a", "b"))):
+                for pt in portas:
+                    troca[(prefixo + velho, pt)] = (prefixo + novo, pt)
+            mudar = lambda pt: troca.get(tuple(pt), tuple(pt))
+            sid = s0.id.replace(f"{c0.destino}.", f"{c.destino}.")
+            s = Sinal(sid, s0.protocolo, s0.papel, s0.padrao, mudar(s0.origem), mudar(s0.destino),
+                      s0.sentidos, c.grupo + f"_R{c.rank}")
+            for sentido, cam in s0.caminhos.items():
+                s.caminhos[sentido] = [mudar(pt) for pt in cam]
+            nl.sinal(s)
+
+    def _alinhar_ranks(self):
+        """Linha de atraso em cada porta do seletor: todos os chips do grupo chegam juntos,
+        e a GPU treina um chip só."""
+        nl = self.nl
+        for sels in self.seletores.values():
+            for sid in sels:
+                b = nl.blocos[sid]
+                ligs = {}
+                for porta in b.portas:
+                    if porta.startswith("r"):
+                        lig = next(l for l in nl.ligacoes_de((sid, porta)) if l.meio == "trilha")
+                        tr = lig.a[0] if lig.b == (sid, porta) else lig.b[0]
+                        ligs[porta] = (lig, nl.blocos[tr].atributos["comprimento_mm"] * PS_POR_MM_TRILHA)
+                alvo = max(t for _, t in ligs.values())
+                passo = MU.PASSO_ALINHAMENTO_PS
+                for porta, (lig, t) in ligs.items():
+                    lig.atributos["atraso_ps"] = round((alvo - t) / passo) * passo
+                b.atributos["faixa_usada_ps"] = round(alvo - min(t for _, t in ligs.values()), 1)
 
     def _casar_comprimentos(self, grupos):
         """Serpentina: dentro de um grupo síncrono, toda trilha fica com o comprimento da maior."""
@@ -770,6 +932,26 @@ class _Construtor:
                 a = self.nl.blocos[t].atributos
                 a["serpentina_mm"] = round(maior - a["comprimento_mm"], 2)
                 a["comprimento_mm"] = round(maior, 2)
+
+    def _detectores_rank(self):
+        """Um detector por grupo de chips, no tradutor do grupo: lê o ACT (linha alta) e o banco
+        de cada comando que chega e diz a cada seletor qual chip atende."""
+        nl = self.nl
+        for lider, sels in sorted(self.seletores.items()):
+            chip = nl.blocos[sels[0]].pai
+            det = f"{chip}:rank"
+            nl.bloco(det, "detector_rank", nl.blocos[chip].posicao, pai=chip, grupo=lider,
+                     ranks=self.ranks, decodifica=["ACT:linha_alta", "banco"],
+                     latencia_ps=LATENCIA_RANK_PS, seletores=len(sels))
+            nl.porta(det, "rank", "controle", "sai")
+            nl.porta(det, "vdd", "energia", "entra", tensao_v=VDD_CHIP_V)
+            nl.ligar((chip, "vdd"), (det, "vdd"), "interno")
+            for k, ponto in enumerate(sorted(self.ca_par[lider])):
+                pad = nl.blocos[ponto[0]].portas[ponto[1]].padrao
+                nl.porta(det, f"ca{k}", "eletrico", "entra", padrao=pad)
+                nl.ligar(ponto, (det, f"ca{k}"), "interno" if nl.blocos[ponto[0]].pai == chip else "trilha")
+            for sel in sels:
+                nl.ligar((det, "rank"), (sel, "sel"), "interno" if nl.blocos[sel].pai == chip else "trilha")
 
     def _detectores(self):
         nl = self.nl
@@ -905,11 +1087,9 @@ class _Construtor:
         if "FPGA" not in self.pecas:
             return
         livres = self._ctl_livres()
-        dimms = sorted(n for n in self.pecas if n.startswith("DIMM"))
+        dimms = self._com_spd()
         spd_pch = list(self.pch.peca.interfaces["SPD"].sinais) if self.pch else []
         for k, dimm in enumerate(dimms):
-            if "SPD" not in self.pecas[dimm].peca.interfaces:
-                continue
             for pino, sentido in (("HSCL", "ida"), ("HSDA", "duplo")):
                 if self.pch and f"SPD{k}_{pino}" in spd_pch:
                     c = _CanalLento("PCH-" + dimm, sentido, "AUX", pino, "SPD_" + dimm)
@@ -917,6 +1097,47 @@ class _Construtor:
                 else:
                     c = _CanalLento("FPGA-" + dimm, sentido, "AUX", pino, "SPD_" + dimm)
                     self._lento(c, "FPGA", next(livres), dimm, pino)
+
+    def _com_spd(self):
+        """Quem a CPU enxerga como DIMM: DDR5 escravo e SPD (o DIMM e a ponte do banco)."""
+        return sorted(n for n, p in self.pecas.items()
+                      if n != "CPU" and {"DDR5", "SPD"} <= set(p.peca.interfaces))
+
+    def banco(self):
+        """A lógica da ponte (mapas aprendidos, DIMM emulado) e a posse no FPGA."""
+        if not self.ponte:
+            return
+        nl, pc = self.nl, self.pecas[self.ponte]
+        ida, volta = self.atrasos_ponte()
+        lat = MU.latencia_ponte(ida / 1000, volta / 1000)
+        mem = [p for p in self.pecas.values() if p.tipo == "GDDR7"]
+        chip_gb = min(p.peca.capacidade_gb for p in mem)
+        dens = min(self.pecas[n].peca.densidade_max_gb for n in ("GPU", self.ponte))
+        nl.bloco("ctl:ponte", "controlador", (pc.x, pc.y), peca=self.ponte,
+                 capacidades=[OPCIONAL_MEMORIA, "mapas-aprendidos", "DIMM-emulado"],
+                 canais=MU.CANAIS_GPU, ranks=self.ranks, cl_declarado=lat["cl"],
+                 trcd_declarado=lat["trcd"], janela_gb=len(mem) * chip_gb, chip_real_gb=chip_gb,
+                 densidade_max_gb=dens, chips=len(mem), ida_ps=round(ida, 1), volta_ps=round(volta, 1),
+                 phy_ddr5_ns=MU.PONTE_PHY_DDR5_NS, logica_ns=MU.PONTE_LOGICA_NS,
+                 phy_gddr7_ns=MU.PONTE_PHY_GDDR7_NS, nota="mapas de endereço, filas e posse")
+        nl.porta("ctl:ponte", "vdd", "energia", "entra", tensao_v=0.85)
+        nl.porta("ctl:ponte", "ctl", "controle", "entra")
+        self._alimentar("ctl:ponte", "vdd", f"rail:{self.ponte}:VCCINT", 0.0)
+        self._ctl_i3c("ctl:ponte")
+        nl.blocos["ctl:fpga"].atributos["capacidades"].append("posse-do-banco")
+
+    def atrasos_ponte(self):
+        """Pior atraso pino a pino da ponte até os chips (comando) e de volta (dado lido)."""
+        ida = volta = 0.0
+        for s in self.nl.sinais.values():
+            if s.protocolo != "GDDR7-32" or not s.id.startswith(f"{self.ponte}."):
+                continue
+            t = atraso_caminho_ps(self.nl, s.caminhos["ida"], s.protocolo)
+            if s.papel in ("CA", "CK", "WCK"):
+                ida = max(ida, t)
+            if "volta" in s.caminhos:
+                volta = max(volta, atraso_caminho_ps(self.nl, s.caminhos["volta"], s.protocolo))
+        return ida, volta
 
     def _ctl_livres(self):
         if not hasattr(self, "_livres"):
@@ -1118,19 +1339,22 @@ class _Construtor:
               Requisito("CPU", "sequenciamento-PWROK", plat)]
         if self.pch:
             R.append(Requisito("PCH", "firmware-ME", prov_flash("firmware-ME")))
-        for nome in self.pecas:
-            if nome.startswith("DIMM"):
-                tem = all(f"{nome}:{p}" in nl.blocos for p in ("HSCL", "HSDA"))
-                R.append(Requisito(nome, "SPD/I3C", plat if tem else None))
+        for nome in self._com_spd():
+            tem = all(f"{nome}:{p}" in nl.blocos for p in ("HSCL", "HSDA"))
+            R.append(Requisito(nome, "SPD/I3C", plat if tem else None))
+        for m in sorted({b.atributos["peca"] for b in nl.por_tipo("mux_dono")}):
+            R.append(Requisito(m, "posse-do-banco", "ctl:fpga"))
         raiz = "CPU:PEG_TX0"
         tem_raiz = raiz in nl.blocos
         # memória compartilhada coerente exige CXL nas duas pontas do PEG; é opcional
         cxl = tem_raiz and all(n in self.pecas and self.pecas[n].peca.cxl for n in ("CPU", "GPU"))
         if tem_raiz:
-            nl.blocos[raiz].atributos["capacidades"] = ["raiz-PCIe"] + ([OPCIONAL_CXL] if cxl else [])
+            nl.blocos[raiz].atributos["capacidades"] = ["raiz-PCIe"] + ([OPCIONAL_MEMORIA] if cxl else [])
+        compartilha = "ctl:ponte" if "ctl:ponte" in nl.blocos else (raiz if cxl else None)
         R += [Requisito("GPU", "raiz-PCIe", raiz if tem_raiz else None),
               Requisito("GPU", "12V-cabo", "fonte:atx"),
-              Requisito("GPU", OPCIONAL_CXL, raiz if cxl else None)]
+              Requisito("GPU", OPCIONAL_MEMORIA, compartilha),
+              Requisito("CPU", OPCIONAL_MEMORIA, compartilha)]
 
 
 class _CanalLento:
@@ -1168,6 +1392,7 @@ def construir(montagem, configuracao, plano, cfg_optica, chave=None, posicioname
         c.sinais_rapidos()
         c.sinais_lentos()
         c.sideband()
+        c.banco()
         c.plataforma()
         c.relogios()
         c.laser()

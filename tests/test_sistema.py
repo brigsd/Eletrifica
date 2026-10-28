@@ -48,7 +48,7 @@ def test_sondagem_nao_vaza_nomes(mapeado):
 def test_configuracao_so_liga_celulas_identificadas(mapeado):
     m, _, sond, ids = mapeado
     cfg = C.configurar(m.base, ids, sond)
-    assert {p.nome for p in cfg.pecas} >= {"CPU", "GPU", "FPGA", "PCH", "DIMM0", "DIMM1", "MEM0", "MEM11"}
+    assert {p.nome for p in cfg.pecas} >= {"CPU", "GPU", "FPGA", "PCH", "DIMM", "PONTE", "MEM0", "MEM23"}
     ligadas = cfg.funcao > 0
     assert (cfg.peca[ligadas] >= 0).all()
     cpu = cfg.por_nome("CPU")

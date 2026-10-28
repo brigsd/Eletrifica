@@ -78,6 +78,21 @@ foram aplicadas ao modelo (2026-10-28); o efeito é o medido depois de rodar de 
 | canais a ~140 GHz | 200–400 GHz demonstrados | 16 λ a 200 GHz não cabem num FSR de 13 nm. A configuração `viavel` passa a anel de raio 3,5 µm: FSR de 18,6 nm e 16 λ a ~203 GHz |
 | CPU lê a VRAM em ~800 ns | ~1.200 ns (uma fonte, método não informado) | ReBAR a ~1.200 ns, contra ~90 ns da DDR5 local |
 
+## Banco unificado (2026-10-28)
+
+A memória compartilhada é o centro do conceito. Sem CXL nas peças, o modelo agora a
+resolve na própria base (`modulos/dados/memoria_unificada.py`): 24 chips GDDR7 que a GPU
+enxerga como 12 de 32 Gb, mais uma ponte que a CPU enxerga como DIMM. O que existe de
+cada parte:
+
+| Premissa | Status | Melhor exemplo real | Distância | Risco |
+|---|---|---|---|---|
+| Base multiplica os chips por canal (um chip de 32 Gb feito de dois de 16 Gb, escolhidos pelo comando) | parecido à venda | LRDIMM DDR3: o buffer converte o chip select do controlador em vários ranks físicos, 2:1 ou 4:1, pela linha e coluna; o padrão GDDR7 vai de 16 a 32 Gb | ninguém faz isso em GDDR7; a GPU precisa aceitar o chip de 32 Gb do padrão, que talvez nunca tenha visto | médio |
+| Ponte que se apresenta como DIMM DDR5 com CL53 e grava nos chips GDDR7 | parecido | os registradores do DDR5 aceitam CL22 a CL66; o MRDIMM já põe um buffer no caminho e paga latência | o controlador da i5 tem de aceitar CL53 a 4800 MT/s e um SPD fora dos perfis comuns | médio |
+| Aprender os mapas de endereço da CPU e da GPU no boot | demonstrado em pesquisa | DRAMA: mapas da Intel são XOR de bits, achados por tempo de acesso; GPUHammer: mapa da GDDR6 de uma A6000 achado do mesmo jeito | o DRAMA avisa que triplo canal pode não ser linear; nos 12 canais o modelo usa o resto por 3, e a calibração confere com sondas aleatórias | médio |
+| Base responde refresh e treino periódico da GPU para o chip que está com a CPU | sem evidência | modelos de memória GDDR7 existem como IP de verificação | a base passa a imitar parte de um chip GDDR7 | médio-alto |
+| Posse por rank respeitada pelo software | depende do runtime | — | o runtime da GPU (o nosso, no laboratório) só usa o rank que é dela | baixo |
+
 ## O que destravaria cada bloqueio
 
 - **Célula chaveada:** abrir mão da célula de função selecionável. Os caminhos
@@ -92,6 +107,8 @@ foram aplicadas ao modelo (2026-10-28); o efeito é o medido depois de rodar de 
   aberta (por exemplo, um SoC RISC-V ou ARM sem chipset fechado).
 
 ## Fontes
+
+- Banco unificado: [LRDIMM e multiplicação de rank](https://www.electronicdesign.com/memory/take-lrdimm-challenge-boost-server-speed-capacity), [patente de rank não binário](https://patents.justia.com/patent/10522209), [CL22 a CL66 no DDR5](https://www.anandtech.com/show/16143), [GDDR7 de 16 a 32 Gb](https://www.guru3d.com/story/jedec-jesd239-gddr7-standard-upcoming-highspeed-memory-technology/), [MRDIMM](https://amp.hothardware.com/news/ddr5-mrdimms-standardized-up-to-17600), [DRAMA](https://www.usenix.org/conference/usenixsecurity16/technical-sessions/presentation/pessl), [GPUHammer](https://arxiv.org/html/2507.08166v1)
 
 - Elastômero e LGA: [ISC](https://abachy.com/node/1004), [Fujipoly Zebra](https://pcdandf.com/pcdesign/index.php/editorial/menu-new-indust-prod/5630-fujipoly-releases-silver-zebra-connector), [TE LGA](https://uk.rs-online.com/web/p/prototyping-sockets/1855357), [Invisipin](https://www.advantest.com/en/products/component-test-system/ais/invisipin-test-sockets/), [patente KR102728126B1](https://patents.google.com/patent/KR102728126B1/ko)
 - MEMS: [Menlo Micro](https://www.microwavejournal.com/articles/39237-menlo-micro-demonstrates-highest-power-mems-switch), [ADI ADGM1121](https://mouser.com/datasheet/2/609/adgm1121-3468022.pdf), [ADI FAQ](https://ez.analog.com/switches_multiplexers/a/documents/do27248/mems-switch-technology-faq-s)

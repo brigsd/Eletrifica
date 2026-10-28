@@ -2,13 +2,16 @@
 
 Sem CXL nas duas pontas (i5-13600KF e a GPU não têm), a CPU só enxerga a memória
 da GPU por uma BAR redimensionável (ReBAR) sobre o PCIe: sem coerência, com o
-custo de protocolo do PCIe e o caminho óptico da base. Compara com a DDR5 local
-e com memória unificada no encapsulamento.
+custo de protocolo do PCIe e o caminho óptico da base. Com o banco unificado da
+base (`memoria_unificada`), a CPU lê os mesmos chips da GPU pelo canal DDR5 dela,
+através da ponte. Compara com a DDR5 local e com memória unificada no encapsulamento.
 
     from modulos.dados.memoria_compartilhada import comparar
     linhas = comparar(netlist)
 """
 from modulos.conexoes.verificador import OPCIONAIS, atraso_caminho_ps
+from modulos.dados import memoria_unificada as MU
+from modulos.dados.comandos import TCK_DDR5_NS
 
 # PCIe 5.0 x16
 PCIE_GT_S = 32.0
@@ -44,29 +47,41 @@ def _caminho_ps(netlist, protocolo, pecas):
 
 
 def _coerente(netlist):
+    """CXL nas duas pontas do PEG (quem provê a memória compartilhada é a raiz PCIe)."""
     for q in netlist.requisitos:
-        if q.capacidade in OPCIONAIS:
-            b = netlist.blocos.get(q.provedor) if q.provedor else None
+        if q.capacidade in OPCIONAIS and q.provedor and q.provedor != "ctl:ponte":
+            b = netlist.blocos.get(q.provedor)
             return b is not None and q.capacidade in b.atributos.get("capacidades", ())
     return False
+
+
+def _pecas_ddr5(netlist):
+    """Quem está do outro lado dos canais DDR5 da CPU, separando os DIMMs da ponte do banco."""
+    pecas = {x[0].split(":", 1)[0] for s in netlist.sinais.values() if s.protocolo == "DDR5-4800"
+             for x in (s.origem, s.destino)} - {"CPU"}
+    pontes = {b.atributos.get("peca") for b in netlist.por_tipo("controlador")
+              if "DIMM-emulado" in b.atributos.get("capacidades", ())}
+    return sorted(pecas - pontes), sorted(pecas & pontes)
 
 
 def comparar(netlist):
     pico_pcie = PCIE_VIAS * PCIE_GT_S * PCIE_CODIFICACAO / 8
     efic_pcie = MPS_B / (MPS_B + CABECALHO_TLP_B + ENQUADRAMENTO_B) * (1 - FRACAO_DLLP)
     voo_pcie = _caminho_ps(netlist, "PCIe5", ("CPU", "GPU"))
-    pico_ddr = DDR5_CANAIS * DDR5_BITS_CANAL * DDR5_MT_S / 8 / 1000
-    voo_ddr = max(_caminho_ps(netlist, "DDR5-4800", ("CPU", d)) for d in ("DIMM0", "DIMM1"))
+    dimms, pontes = _pecas_ddr5(netlist)
+    canais_ddr = len(dimms) or DDR5_CANAIS
+    pico_ddr = canais_ddr * DDR5_BITS_CANAL * DDR5_MT_S / 8 / 1000
+    voo_ddr = max((_caminho_ps(netlist, "DDR5-4800", ("CPU", d)) for d in dimms), default=0.0)
     pico_uni = UNIFICADA_BITS * UNIFICADA_MT_S / 8 / 1000
     cxl = _coerente(netlist)
-    return {
+    out = {
         "rebar_pcie": {
             "nome": "GPU vista pela CPU (CXL)" if cxl else "GPU vista pela CPU (ReBAR, PCIe 5 x16)",
             "banda_pico_gb_s": pico_pcie, "banda_gb_s": pico_pcie * efic_pcie,
             "latencia_ns": LEITURA_PCIE_NS + 2 * voo_pcie / 1000, "caminho_ns": voo_pcie / 1000,
             "coerente": cxl, "nesta_montagem": voo_pcie > 0},
         "ddr5_local": {
-            "nome": "DDR5 local (2 canais DDR5-4800)",
+            "nome": f"DDR5 local ({canais_ddr} canal{'is' if canais_ddr > 1 else ''} DDR5-4800)",
             "banda_pico_gb_s": pico_ddr, "banda_gb_s": pico_ddr * EFICIENCIA_DDR5,
             "latencia_ns": LEITURA_DDR5_NS + 2 * voo_ddr / 1000, "caminho_ns": voo_ddr / 1000,
             "coerente": True, "nesta_montagem": voo_ddr > 0},
@@ -76,3 +91,16 @@ def comparar(netlist):
             "latencia_ns": LEITURA_UNIFICADA_NS, "caminho_ns": 0.0,
             "coerente": True, "nesta_montagem": False},
     }
+    if pontes:
+        ponte = next(b for b in netlist.por_tipo("controlador") if b.atributos.get("peca") == pontes[0]
+                     and "DIMM-emulado" in b.atributos.get("capacidades", ()))
+        a = ponte.atributos
+        voo = _caminho_ps(netlist, "DDR5-4800", ("CPU", pontes[0]))
+        pico = MU.BANDA_CANAL_DDR5_GBPS
+        out["banco"] = {
+            "nome": f"Banco unificado pela ponte ({a['janela_gb']:.0f} GB, os chips da GPU)",
+            "banda_pico_gb_s": pico, "banda_gb_s": pico * EFICIENCIA_DDR5,
+            "latencia_ns": LEITURA_DDR5_NS + (a["cl_declarado"] - MU.CL_DDR5_NATIVO) * TCK_DDR5_NS
+            + 2 * voo / 1000, "caminho_ns": voo / 1000,
+            "coerente": "por posse", "nesta_montagem": True}
+    return out

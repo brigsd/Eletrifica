@@ -8,6 +8,7 @@ tempo, relógio, requisitos e sobras. Não conserta nada.
     rel = verificar(netlist)          # rel.ok, rel.violacoes, rel.resumo()
 """
 import math
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
@@ -18,10 +19,11 @@ from modulos.dados.protocolos import PROTOCOLOS
 REGRAS = ("R01-caminho", "R02-sentido", "R03-padrao", "R04-banda", "R05-optico",
           "R06-energia", "R07-controle", "R08-capacidade", "R09-tempo", "R10-relogio",
           "R11-requisito", "R12-orfao", "R13-temperatura", "R14-consumo",
-          "R15-decodificacao", "R16-ajuste", "R17-pcie", "R18-memoria-compartilhada")
+          "R15-decodificacao", "R16-ajuste", "R17-pcie", "R18-memoria-compartilhada",
+          "R19-posse", "R20-banco")
 
 # capacidades que melhoram o sistema mas não impedem o boot (R18 avisa)
-OPCIONAIS = {"memoria-compartilhada-CXL"}
+OPCIONAIS = {"memoria-compartilhada"}
 # regiões da imagem da flash que cada firmware exige
 REGIOES_FIRMWARE = {"firmware-UEFI": ("descritor", "BIOS"), "firmware-ME": ("descritor", "ME")}
 
@@ -41,7 +43,7 @@ MAX_DISPOSITIVOS_BARRAMENTO = 32
 
 # blocos que não funcionam sem alimentação, mesmo sem porta declarada
 PRECISAM_ENERGIA = {"chip_tradutor", "laser", "regulador", "controlador", "relogio",
-                    "detector_sentido", "conversor_nivel"}
+                    "detector_sentido", "detector_rank", "conversor_nivel"}
 # portas sem as quais o bloco não faz sentido
 OBRIGATORIAS = {
     "pino": ("e",), "celula": ("pino", "base"), "trilha": ("a", "b"),
@@ -50,6 +52,7 @@ OBRIGATORIAS = {
     "chave_sentido": ("pino", "tx", "rx", "sentido"), "detector_sentido": ("sentido",),
     "acoplador": ("chip", "fibra"), "fibra": ("a", "b"), "regulador": ("vin", "vout"),
     "laser": ("vdd",),
+    "seletor_rank": ("pino", "r0", "sel"), "mux_dono": ("pino", "sel"), "detector_rank": ("rank", "vdd"),
 }
 PASSIVOS_ELETRICOS = {"celula", "trilha"}            # ligam suas portas elétricas por dentro
 PASSIVOS_OPTICOS = {"fibra", "divisor", "acoplador", "chip_tradutor"}
@@ -431,7 +434,7 @@ def _r05(net, rel, contexto):
                                               f"{s.id} ({sentido}): transmite em {lt} nm e recebe em {lr} nm"))
             for f in blocos[i_tx + 1:i_rx]:
                 if net.blocos.get(f) and net.blocos[f].tipo == "fibra" and lt is not None:
-                    por_fibra[f].append((round(lt, 3), s.id, sentido))
+                    por_fibra[f].append((round(lt, 3), blocos[i_tx], s.id))
             if pad is not None:
                 extra = sum(net.blocos[x].atributos.get("perda_extra_db", 0.0) for x in blocos if x in net.blocos)
                 m = _margem(contexto, s, pad) - extra
@@ -439,9 +442,17 @@ def _r05(net, rel, contexto):
                     rel.violacoes.append(Violacao(R, "erro", s.id,
                                                   f"{s.id} ({sentido}): margem óptica {m:.2f} dB"))
     for f, usos in por_fibra.items():
-        # ida e volta de um pino comutado usam o mesmo λ, nunca ao mesmo tempo
-        cont = Counter(l for l, _ in {(l, sid) for l, sid, _ in usos})
-        rep = [l for l, n in cont.items() if n > 1]
+        # ida e volta de um pino comutado usam o mesmo λ, nunca ao mesmo tempo; um modulador
+        # que atende vários chips de um grupo (seletor de rank) é um λ só. Usos ligados por
+        # sinal ou por modulador são um uso; dois grupos sem ligação colidem
+        rep = []
+        for lam in sorted({l for l, _, _ in usos}):
+            uf = _UF()
+            for l, via, sid in usos:
+                if l == lam:
+                    uf.union(("via", via), ("sinal", sid))
+            if len({uf.find(k) for k in list(uf.p)}) > 1:
+                rep.append(lam)
         if rep:
             rel.violacoes.append(Violacao(R, "erro", f, f"{f}: comprimento de onda repetido {rep[:4]}"))
     for f in net.por_tipo("fibra"):
@@ -579,8 +590,8 @@ def _r07(net, rel):
         for n, p in b.portas.items():
             if p.dominio != "controle" or p.sentido == "sai":
                 continue
-            if b.tipo in ("chave_sentido", "detector_sentido"):
-                continue          # sentido vem do detector, verificado em R02
+            if b.tipo in ("chave_sentido", "detector_sentido", "seletor_rank"):
+                continue          # sentido e rank vêm dos detectores, verificados em R02 e R20
             if uf.find((b.id, n)) not in raizes_ok:
                 rel.violacoes.append(Violacao(R, "erro", b.id, f"{b.id}.{n}: não chega a nenhum controlador"))
     for cid in controladores:
@@ -679,13 +690,22 @@ def _r09(net, rel, contexto):
     limites = {**ATRASO_MAX_PS, **ctx.get("atraso_max_ps", {})}
     alcance_ui = ctx.get("alcance_treinamento_ui", ALCANCE_TREINO_UI)
     atrasos = {}
+    pontes = _pontes(net)
     for s in net.sinais.values():
         pr = PROTOCOLOS.get(s.protocolo)
         ps_mm = pr.ps_por_mm_trilha if pr else PS_POR_MM_TRILHA
+        da_ponte = _peca_do_ponto(s.origem) in pontes or _peca_do_ponto(s.destino) in pontes
         for sentido, cam in s.caminhos.items():
             t = _atraso_ps(net, cam, ps_mm)
             atrasos[(s.id, sentido)] = t
             lim = limites.get(s.protocolo)
+            if lim is not None:
+                # o chip que a base emula declara RL maior: cobre o seletor de rank
+                lim += max((net.blocos[b].atributos.get("latencia_declarada_extra_ps", 0.0)
+                            for b in _blocos_do_caminho(cam)
+                            if b in net.blocos and net.blocos[b].tipo == "seletor_rank"), default=0.0)
+            if da_ponte:
+                lim = None        # a ponte controla os próprios canais: o orçamento dela é o CL (R20)
             if lim is not None and t > lim:
                 rel.violacoes.append(Violacao(R, "erro", s.id,
                                               f"{s.id} ({sentido}): {t:.0f} ps > {lim:.0f} ps"))
@@ -728,6 +748,15 @@ def _r09(net, rel, contexto):
                                           f"{pr.tolerancia_desalinhamento_ps:.1f} ps"))
 
 
+def _pontes(net):
+    return {b.atributos.get("peca") for b in net.por_tipo("controlador")
+            if "DIMM-emulado" in b.atributos.get("capacidades", ())}
+
+
+def _peca_do_ponto(pt):
+    return pt[0].split(":", 1)[0]
+
+
 def _e_relogio(padrao):
     p = PADROES.get(padrao)
     return p is not None and (p.codificacao == "relogio" or p.nome.endswith(RELOGIO_PAPEIS))
@@ -736,15 +765,23 @@ def _e_relogio(padrao):
 def _r10(net, rel, uf, redes):
     R = "R10-relogio"
     fontes = Counter()
+    revezam = defaultdict(set)        # ponto -> muxes de posse no caminho de cada fonte
+
+    def mux_no_caminho(s):
+        return next((b for b in _blocos_do_caminho(s.caminhos.get("ida", ()))
+                     if b in net.blocos and net.blocos[b].tipo == "mux_dono"), None)
     for s in net.sinais.values():
         origem = net.blocos.get(s.origem[0])
         if origem is not None and origem.tipo == "relogio":
             continue          # já contado pela rede elétrica do gerador
-        if len(s.sentidos) == 2:
-            fontes[tuple(s.origem)] += 1
-            fontes[tuple(s.destino)] += 1
-        else:
-            fontes[tuple(s.destino)] += 1
+        pontos = (tuple(s.origem), tuple(s.destino)) if len(s.sentidos) == 2 else (tuple(s.destino),)
+        mux = mux_no_caminho(s)
+        for pt in pontos:
+            if mux and pt == tuple(s.destino):
+                if mux in revezam[pt]:
+                    continue      # outro controlador pelo mesmo mux: um de cada vez
+                revezam[pt].add(mux)
+            fontes[pt] += 1
     relogio_na_rede = Counter()
     for b in net.por_tipo("relogio"):
         for n, p in b.portas.items():
@@ -797,7 +834,8 @@ def _r11(net, rel):
 
 
 def _r18(net, rel):
-    """Memória compartilhada coerente (CXL) é opcional: sem ela o sistema liga e usa ReBAR."""
+    """Memória compartilhada (banco unificado da base, ou CXL nas pontas) é opcional: sem ela o
+    sistema liga e usa ReBAR."""
     R = "R18-memoria-compartilhada"
     for q in net.requisitos:
         if q.capacidade not in OPCIONAIS:
@@ -805,8 +843,9 @@ def _r18(net, rel):
         b = net.blocos.get(q.provedor) if q.provedor else None
         if b is None or q.capacidade not in b.atributos.get("capacidades", ()):
             rel.violacoes.append(Violacao(R, "aviso", f"{q.peca}:{q.capacidade}",
-                                          f"{q.peca} sem {q.capacidade}: falta CXL numa das pontas; a memória "
-                                          f"do outro lado só é vista por ReBAR sobre PCIe, sem coerência"))
+                                          f"{q.peca} sem {q.capacidade}: nem banco unificado na base nem CXL "
+                                          f"nas pontas; a memória do outro lado só é vista por ReBAR sobre "
+                                          f"PCIe, sem coerência"))
 
 
 def _r12(net, rel):
@@ -965,10 +1004,17 @@ def consumo(netlist, contexto=None):
     partes["tradutores"] -= nominal_w
     partes["aquecedores (pior caso)"] = pior_w
     banda = Counter()
+    pontes = _pontes(netlist)
     for s in netlist.sinais.values():
         pad = PADROES.get(s.padrao)
-        if pad and pad.alta_velocidade and s.papel in PAPEIS_DADOS:
-            banda[s.protocolo] += pad.taxa_gbps
+        if not (pad and pad.alta_velocidade and s.papel in PAPEIS_DADOS):
+            continue
+        # banco unificado: o segundo chip do grupo divide a luz do primeiro, e o que a ponte leva
+        # aos chips é o mesmo dado do canal DDR5 da CPU; conta uma vez só
+        if re.search(r"_R[1-9]\d*$", s.grupo or "") or (
+                s.protocolo == "GDDR7-32" and {_peca_do_ponto(s.origem), _peca_do_ponto(s.destino)} & pontes):
+            continue
+        banda[s.protocolo] += pad.taxa_gbps
     total_w = sum(partes.values())
     gbps = sum(banda.values())
     ref = (sum(g * REFERENCIA_PJ_BIT.get(p, REFERENCIA_PADRAO_PJ_BIT) for p, g in banda.items()) / gbps
@@ -1116,6 +1162,134 @@ def _r17(net, rel, contexto):
                                           f"largura {o['largura_ui']:.2f} UI)"))
 
 
+# ------------------------------------------------------------- banco unificado
+def _pontas_gddr7(net):
+    """Por sinal GDDR7: (ponto do lado do chip de memória, peça controladora)."""
+    sinais = [s for s in net.sinais.values() if s.protocolo == "GDDR7-32"]
+    controladores = {_peca_do_ponto(s.origem) for s in sinais if s.papel == "CA"}
+    out = []
+    for s in sinais:
+        a, b = _peca_do_ponto(s.origem), _peca_do_ponto(s.destino)
+        if a in controladores and b not in controladores:
+            out.append((s, tuple(s.destino), a))
+        elif b in controladores and a not in controladores:
+            out.append((s, tuple(s.origem), b))
+    return out
+
+
+def _r19(net, rel):
+    """Um chip que ouve mais de um controlador passa por um mux de posse comandado pelo FPGA,
+    e cada chip do banco é alcançado pela GPU e pela ponte."""
+    R = "R19-posse"
+    muxes = net.por_tipo("mux_dono")
+    if not muxes:
+        return
+    ctls, mux_do = defaultdict(set), defaultdict(set)
+    for s, pt, ctl in _pontas_gddr7(net):
+        ctls[pt].add(ctl)
+        for bid in _blocos_do_caminho(next(iter(s.caminhos.values()))):
+            if bid in net.blocos and net.blocos[bid].tipo == "mux_dono":
+                mux_do[pt].add(bid)
+    for pt, cs in sorted(ctls.items()):
+        if len(cs) > 1 and len(mux_do[pt]) != 1:
+            rel.violacoes.append(Violacao(R, "erro", pt[0],
+                                          f"{pt[0]} ouve {len(cs)} controladores ({', '.join(sorted(cs))}) "
+                                          f"sem um mux de posse só ({len(mux_do[pt])})"))
+    for m in muxes:
+        lados = m.atributos.get("controladores", [])
+        if len(set(lados)) != len(lados) or len([n for n in m.portas if n.startswith("r")]) != len(lados):
+            rel.violacoes.append(Violacao(R, "erro", m.id, f"{m.id}: entradas {lados} não batem com as portas"))
+        dono = [lig for lig in net.ligacoes_de((m.id, "sel"))
+                if (lig.a if lig.b == (m.id, "sel") else lig.b)[0] == m.pai]
+        if not dono:
+            rel.violacoes.append(Violacao(R, "erro", m.id, f"{m.id}: a posse não chega pelo controle do tradutor"))
+    pontes = _pontes(net)
+    por_chip = defaultdict(set)
+    for pt, cs in ctls.items():
+        por_chip[_peca_do_ponto(pt)] |= cs
+    for chip, cs in sorted(por_chip.items()):
+        if not (cs & pontes) or cs <= pontes:
+            rel.violacoes.append(Violacao(R, "erro", chip,
+                                          f"{chip} fora do banco: só {', '.join(sorted(cs))} chega a ele"))
+
+
+def _r20(net, rel):
+    """Banco unificado: o que a GPU endereça, o CL que a ponte declara, o seletor e o alinhamento."""
+    R = "R20-banco"
+    from modulos.dados import memoria_unificada as MU
+    for c in net.por_tipo("controlador"):
+        a = c.atributos
+        if "DIMM-emulado" not in a.get("capacidades", ()):
+            continue
+        visto = a["ranks"] * a["chip_real_gb"]
+        if visto > a["densidade_max_gb"]:
+            rel.violacoes.append(Violacao(R, "erro", c.id,
+                                          f"{c.id}: a GPU veria chips de {visto * 8:.0f} Gb; o maior que ela "
+                                          f"endereça é {a['densidade_max_gb'] * 8:.0f} Gb"))
+        if a["chips"] != a["canais"] * a["ranks"]:
+            rel.violacoes.append(Violacao(R, "erro", c.id,
+                                          f"{c.id}: {a['chips']} chips não fecham {a['canais']} canais "
+                                          f"x {a['ranks']} ranks"))
+        ida = volta = 0.0
+        for s in net.sinais.values():
+            if s.protocolo != "GDDR7-32" or _peca_do_ponto(s.origem) != a["peca"]:
+                continue
+            if s.papel in ("CA", "CK", "WCK"):
+                ida = max(ida, atraso_caminho_ps(net, s.caminhos["ida"], s.protocolo))
+            if "volta" in s.caminhos:
+                volta = max(volta, atraso_caminho_ps(net, s.caminhos["volta"], s.protocolo))
+        lat = MU.latencia_ponte(ida / 1000, volta / 1000)
+        if not lat["cabe"]:
+            rel.violacoes.append(Violacao(R, "erro", c.id,
+                                          f"{c.id}: a leitura pela ponte leva {lat['leitura_ns']:.1f} ns = "
+                                          f"CL{lat['cl']}; o DDR5 aceita até CL{lat['cl_max']}"))
+        elif a.get("cl_declarado", 0) < lat["cl"]:
+            rel.violacoes.append(Violacao(R, "erro", c.id,
+                                          f"{c.id}: o SPD declara CL{a.get('cl_declarado')} e a ponte "
+                                          f"precisa de CL{lat['cl']}"))
+    for sel in net.por_tipo("seletor_rank"):
+        a = sel.atributos
+        portas = [n for n in sel.portas if n.startswith("r")]
+        soltas = [n for n in portas if not net.ligacoes_de((sel.id, n))]
+        if len(portas) != a.get("ranks", 1) or soltas:
+            rel.violacoes.append(Violacao(R, "erro", sel.id,
+                                          f"{sel.id}: {len(portas) - len(soltas)} chips de {a.get('ranks')}"))
+        det = None
+        for lig in net.ligacoes_de((sel.id, "sel")):
+            b = net.blocos.get((lig.a if lig.b == (sel.id, "sel") else lig.b)[0])
+            if b is not None and b.tipo == "detector_rank":
+                det = b
+        if det is None:
+            rel.violacoes.append(Violacao(R, "erro", sel.id, f"{sel.id}: nenhum detector escolhe o chip"))
+        else:
+            falta = {"ACT:linha_alta", "banco"} - set(det.atributos.get("decodifica", ()))
+            if falta:
+                rel.violacoes.append(Violacao(R, "erro", det.id, f"{det.id}: não decodifica {sorted(falta)}"))
+            if not any(n.startswith("ca") and net.ligacoes_de((det.id, n)) for n in det.portas):
+                rel.violacoes.append(Violacao(R, "erro", det.id, f"{det.id}: não lê o comando"))
+            if a.get("papel") == "CA" and det.atributos.get("latencia_ps", 0.0) > a.get("atraso_ps", 0.0):
+                rel.violacoes.append(Violacao(R, "erro", sel.id,
+                                              f"{sel.id}: o comando sai em {a['atraso_ps']:.0f} ps e o chip só é "
+                                              f"escolhido em {det.atributos['latencia_ps']:.0f} ps"))
+        if a.get("faixa_usada_ps", 0.0) > a.get("faixa_alinhamento_ps", float("inf")):
+            rel.violacoes.append(Violacao(R, "erro", sel.id,
+                                          f"{sel.id}: igualar os chips pede {a['faixa_usada_ps']:.0f} ps de "
+                                          f"atraso; a linha dá {a['faixa_alinhamento_ps']:.0f} ps"))
+    # medido: do mesmo pino do controlador, todos os chips do grupo chegam juntos
+    tempos = defaultdict(list)
+    for s, pt, ctl in _pontas_gddr7(net):
+        ponta_ctl = tuple(s.origem) if _peca_do_ponto(s.origem) == ctl else tuple(s.destino)
+        for sentido, cam in s.caminhos.items():
+            if any(b in net.blocos and net.blocos[b].tipo == "seletor_rank" for b in _blocos_do_caminho(cam)):
+                tempos[(ponta_ctl, sentido)].append(atraso_caminho_ps(net, cam, s.protocolo))
+    for (pt, sentido), ts in tempos.items():
+        if len(ts) > 1 and max(ts) - min(ts) > MU.TOLERANCIA_DESALINHAMENTO_PS:
+            rel.violacoes.append(Violacao(R, "erro", pt[0],
+                                          f"{pt[0]} ({sentido}): os chips do grupo chegam com "
+                                          f"{max(ts) - min(ts):.1f} ps de diferença; tolerância "
+                                          f"{MU.TOLERANCIA_DESALINHAMENTO_PS:.1f} ps"))
+
+
 def verificar(netlist, contexto=None):
     """Roda as regras e devolve um Relatorio."""
     rel = Relatorio()
@@ -1139,4 +1313,6 @@ def verificar(netlist, contexto=None):
     _r16(netlist, rel)
     _r17(netlist, rel, contexto)
     _r18(netlist, rel)
+    _r19(netlist, rel)
+    _r20(netlist, rel)
     return rel

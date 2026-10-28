@@ -219,7 +219,8 @@
   });
 
   // ---- fibras -------------------------------------------------------------
-  const CORES_ENLACE = { DDR5: 0x4ea3ff, GDDR7: 0xb07cff, PCIe: 0x3ddc97, AUX: 0xf2c14e, LASER: 0xff6b6b };
+  const CORES_ENLACE = { DDR5: 0x4ea3ff, GDDR7: 0xb07cff, PCIe: 0x3ddc97, AUX: 0xf2c14e, LASER: 0xff6b6b,
+                         BANCO: 0xff9f43 };
   function texturaPulso() {
     const c = document.createElement("canvas"); c.width = 128; c.height = 8;
     const g = c.getContext("2d");
@@ -289,7 +290,7 @@
 
   // ---- menu ---------------------------------------------------------------
   const GRUPOS = [["Processamento", ["i5-13600KF", "GPU"]], ["Plataforma", ["PCH", "FPGA"]],
-                  ["Memória", ["DDR5-DIMM", "GDDR7"]]];
+                  ["Memória", ["DDR5-DIMM", "PONTE-MEM", "GDDR7"]]];
   const menu = document.getElementById("menu"), boxes = {};
   GRUPOS.forEach(([titulo, tipos]) => {
     const itens = cena.pecas.filter(p => tipos.includes(p.tipo)).sort((a, b) =>

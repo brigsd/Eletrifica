@@ -7,8 +7,9 @@
 
 Uma base no lugar da placa-mãe: CPU, memória e GPU encaixam em qualquer posição
 sobre um elastômero de células chaveadas; a base descobre o que foi encaixado,
-alimenta cada peça e leva os dados por fibra óptica. Conceito em
-[`docs/conceito.md`](docs/conceito.md).
+alimenta cada peça e leva os dados por fibra óptica. O centro do conceito é a
+**memória compartilhada**: a CPU e a GPU usando a mesma memória, como num Apple
+Silicon, mas com peças comuns. Conceito em [`docs/conceito.md`](docs/conceito.md).
 
 Este diretório é o **emulador** desse sistema: lógica, energia, luz e dados,
 simulados pelos módulos em `modulos/` da raiz.
@@ -23,7 +24,7 @@ python3 -m modulos.sistema.simular     # ~30 s; grava docs/ e web/
 
 Os achados principais:
 
-1. **Mapeamento funciona.** As 18 peças são identificadas só por sondagem fraca,
+1. **Mapeamento funciona.** As 30 peças são identificadas só por sondagem fraca,
    em qualquer posição e rotação, com erro de micrômetros.
 2. **64 comprimentos de onda por fibra não fecham** com anéis de raio 5 µm: os
    canais ficam mais próximos que a largura do filtro e a diafonia trava a taxa
@@ -51,9 +52,13 @@ Os achados principais:
 
 9. **Chipset de verdade.** Um Intel B760 entra como peça: gera os relógios,
    sequencia a energia e carrega o ME e a BIOS da flash. O FPGA só orquestra a base.
-10. **Memória compartilhada via CXL não fecha:** nem a i5-13600KF nem a GPU
-    suportam CXL. Pelo PCIe com ReBAR, a CPU lê a GDDR7 a ~55 GB/s e ~1.200 ns,
-    contra ~65 GB/s e ~90 ns da DDR5 local.
+10. **Banco unificado: CPU e GPU na mesma memória.** Sem CXL nas peças, a base
+    resolve: 24 chips GDDR7 (48 GB) que a GPU enxerga como 12 chips de 32 Gb, todos a
+    1,5 TB/s, e uma ponte que a CPU enxerga como um DIMM de 48 GB (CL53). A ponte
+    aprende os mapas de endereço dos dois lados no boot; cada rank tem um dono por
+    vez. A emulação confere bit a bit que a GPU lê o que a CPU gravou. Um LLM de 70B em
+    4 bits cabe inteiro e roda a até ~38 tokens/s, contra ~4,5 do offload de um PC
+    comum. Detalhes na seção do banco em [`docs/resultados.md`](docs/resultados.md).
 
 ## Funciona na prática?
 
@@ -72,8 +77,9 @@ Ficam em `montagem.json`, chave `projeto`:
 | `tradutores: sob_peca` | Ao lado da peça, trilhas de até 120 mm estouram atraso e desalinhamento da GDDR7. Numa camada de fotônica sob a peça, o pino desce poucos mm. |
 | `chave_celula: rele_mems` | A mesma chave não serve para 1 A de energia e para 32 Gb/s: transistor com R_on baixo tem dezenas de pF desligado. Relé aberto é vão de ar (~20 fF); só comuta sem corrente, e as células são configuradas antes de energizar. |
 | `cobre_plano_oz: 2` | Com 1 oz, pinos de VCCIN perto do VRM passam de 1 A. |
-| `placa_fria_h_w_m2k: 1000` | A interconexão dissipa ~118 W dentro da base; só com ar ela chega a ~255 °C e peças, relés e anéis passam do limite. Com placa fria de líquido sob a base, ~67 °C. |
-| `vias_termicas_fracao: 0.05` | O LCP conduz mal: sem cobre atravessando a base, a placa fria rende ~230 W/m²K e a base passa de 95 °C. Com vias térmicas em 5 % da área, ~950 W/m²K e ~67 °C. |
+| `placa_fria_h_w_m2k: 1000` | A interconexão dissipa ~149 W dentro da base; só com ar ela chega a ~267 °C e peças, relés e anéis passam do limite. Com placa fria de líquido sob a base, ~64 °C. |
+| `vias_termicas_fracao: 0.05` | O LCP conduz mal: sem cobre atravessando a base, a placa fria rende ~230 W/m²K e a base passa de 95 °C. Com vias térmicas em 5 % da área, ~950 W/m²K e ~64 °C. |
+| `memoria: unificada` | O conceito gira em torno da memória compartilhada. O PCIe (~64 GB/s) é o gargalo do offloading; a porta rápida da GPU é a de memória. O banco entra por ela, e a CPU chega aos mesmos chips pela ponte, no lugar do segundo DIMM. |
 
 ## Fontes do projeto
 
@@ -91,11 +97,11 @@ Tudo em `docs/*.svg`, `docs/resultados.md` e `web/` é gerado. Não edite à mã
 |--------|--------|
 | `modulos/componentes` | As peças: contatos, função de cada pino, trilhos, interfaces |
 | `modulos/sistema` | Base de células, chave da célula, sondagem, identificação, configuração, boot emulado, simulação completa |
-| `modulos/conexoes` | Netlist do sistema inteiro (cada salto tipado) e o verificador de conexões, com 18 regras; sensibilidade dos números escolhidos |
+| `modulos/conexoes` | Netlist do sistema inteiro (cada salto tipado) e o verificador de conexões, com 20 regras; sensibilidade dos números escolhidos |
 | `modulos/energia` | Divisão de corrente nos contatos, VRM, proteção contra curto, árvore de alimentação |
 | `modulos/termico` | Temperatura da base em regime e no transiente |
 | `modulos/optica` | Anel modulador, filtros, receptor, enlace no tempo, controle térmico dos anéis |
-| `modulos/dados` | Protocolos, roteamento sinal → canal → fibra, latência, rajadas, treino de memória |
+| `modulos/dados` | Protocolos, roteamento sinal → canal → fibra, latência, rajadas, treino de memória, banco unificado (mapas, ponte, posse, LLM) |
 | `modulos/visual` | Cena do visualizador e gráficos |
 
 As pinagens das peças são sintéticas: contagem, passo e proporção entre energia,

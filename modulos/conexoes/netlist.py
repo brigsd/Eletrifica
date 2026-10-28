@@ -27,6 +27,9 @@ TIPOS = {
     "via_rx",          # pista de recepção: filtro + fotodetector + TIA + driver de saída (pai: chip)
     "chave_sentido",   # comuta uma pista bidirecional entre via_tx e via_rx
     "detector_sentido",  # lê o comando (CA) e decide o sentido dos pinos bidirecionais
+    "seletor_rank",    # banco unificado: um pino do controlador para os chips do canal (escolhe pelo comando)
+    "detector_rank",   # lê o comando do canal e decide qual chip (rank) atende
+    "mux_dono",        # banco unificado: o pino do chip ouve um controlador de cada vez (posse pelo FPGA)
     "mux", "demux",    # multiplexação por comprimento de onda (pode ser interna ao chip)
     "acoplador",       # chip <-> fibra
     "fibra",

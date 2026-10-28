@@ -50,6 +50,8 @@ class Componente:
     fracao_calor_base: float  # parte do calor que vai para a base, o resto vai ao dissipador
     cor: str
     cxl: bool = False         # hospeda memória compartilhada por CXL (CXL.mem/CXL.cache)
+    capacidade_gb: float = 0.0       # memória: quanto o chip ou o módulo guarda
+    densidade_max_gb: float = 0.0    # controlador GDDR7: o maior chip que ele endereça
 
     def pino(self, nome):
         return self._indice()[nome]
@@ -214,7 +216,7 @@ def ddr5_dimm():
         interfaces={"DDR5": Interface("DDR5", "DDR5-4800", "i5-13600KF", sinais_nomes),
                     "SPD": Interface("SPD", "DDR5-4800", "FPGA", ["HSCL", "HSDA"])},
         potencia_tipica=6.0, potencia_max=10.0, fracao_calor_base=0.25,
-        cor="#2c6e49")
+        cor="#2c6e49", capacidade_gb=16.0)
 
 
 def gpu():
@@ -255,7 +257,7 @@ def gpu():
         interfaces={"GDDR7": Interface("GDDR7", "GDDR7-32", "GDDR7", sinais("GDDR7")),
                     "PEG": Interface("PEG", "PCIe5", "i5-13600KF", sinais("PEG"))},
         potencia_tipica=220.0, potencia_max=300.0, fracao_calor_base=0.04,
-        cor="#3d3f45", cxl=False)
+        cor="#3d3f45", cxl=False, densidade_max_gb=4.0)
 
 
 def gddr7():
@@ -290,7 +292,7 @@ def gddr7():
         interfaces={"GDDR7": Interface("GDDR7", "GDDR7-32", "GPU",
                                        [p.nome for p in pinos if p.funcao == SINAL])},
         potencia_tipica=2.5, potencia_max=4.0, fracao_calor_base=0.5,
-        cor="#1d1f24")
+        cor="#1d1f24", capacidade_gb=2.0)
 
 
 def _sinais_transceptores():
@@ -406,7 +408,51 @@ def pch():
         cor="#5a7d9a")
 
 
-CATALOGO = {f().tipo: f for f in (i5_13600kf, ddr5_dimm, gpu, gddr7, fpga, pch)}
+def ponte_mem():
+    """Ponte do banco unificado, chip do laboratório: do lado da CPU se apresenta como um DIMM
+    DDR5; do outro tem 12 portas GDDR7 até os chips do banco. BGA de 1600 bolas a 0,8 mm."""
+    nx, ny, passo = 40, 40, 0.8
+    nome = _Contador()
+    # o RESET dos chips do banco é só da GPU
+    sinais = iter(_sinais_ddr5("DDR5") + ["HSCL", "HSDA"]
+                  + [s for c in range(12) for s in _sinais_gddr7(c) if not s.endswith("_RESET")])
+    trilho_io = iter(["VDDQ_DDR5"] * 40 + ["VDDQ_G7"] * 160)
+    pinos = []
+    for ix, iy, x, y in _grade(nx, ny, passo):
+        borda = min(ix, iy, nx - 1 - ix, ny - 1 - iy)
+        xadrez = (ix + iy) % 2 == 0
+        if borda <= 6:                                 # anel externo: os sinais das duas PHYs
+            if (ix + iy) % 4 == 0:
+                pinos.append(Pino(nome("VSS"), TERRA, "VSS", x, y))
+                continue
+            s = next(sinais, None)
+            if s:
+                g = "SPD" if s in ("HSCL", "HSDA") else ("DDR5" if s.startswith("DDR5") else "GDDR7")
+                pinos.append(Pino(s, SINAL, g, x, y))
+            else:
+                pinos.append(Pino(nome("VSS"), TERRA, "VSS", x, y))
+        elif borda <= 9:                               # E/S das PHYs
+            t = next(trilho_io, None) if xadrez else None
+            pinos.append(Pino(nome(t), ENERGIA, t, x, y) if t else Pino(nome("VSS"), TERRA, "VSS", x, y))
+        else:                                          # lógica: mapas, filas e posse
+            pinos.append(Pino(nome("VCCINT"), ENERGIA, "VCCINT", x, y) if xadrez
+                         else Pino(nome("VSS"), TERRA, "VSS", x, y))
+    sinais_de = lambda g: [p.nome for p in pinos if p.grupo == g]
+    return Componente(
+        tipo="PONTE-MEM", nome="Ponte do banco unificado (DDR5 para GDDR7)",
+        largura=33.0, profundidade=33.0, altura=2.4, diametro_pad=0.45,
+        pinos=pinos,
+        trilhos={"VCCINT": Trilho("VCCINT", 0.85, 12.0, "base"),
+                 "VDDQ_DDR5": Trilho("VDDQ_DDR5", 1.1, 1.5, "base"),
+                 "VDDQ_G7": Trilho("VDDQ_G7", 1.2, 6.0, "base")},
+        interfaces={"DDR5": Interface("DDR5", "DDR5-4800", "i5-13600KF", sinais_de("DDR5")),
+                    "SPD": Interface("SPD", "DDR5-4800", "PCH", ["HSCL", "HSDA"]),
+                    "GDDR7": Interface("GDDR7", "GDDR7-32", "GDDR7", sinais_de("GDDR7"))},
+        potencia_tipica=12.0, potencia_max=20.0, fracao_calor_base=0.3,
+        cor="#b5651d", densidade_max_gb=4.0)
+
+
+CATALOGO = {f().tipo: f for f in (i5_13600kf, ddr5_dimm, gpu, gddr7, fpga, pch, ponte_mem)}
 
 _cache = {}
 

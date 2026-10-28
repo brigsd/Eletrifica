@@ -51,7 +51,7 @@ def test_caminhos_ligados_porta_a_porta(montado):
 
 def test_sinal_rapido_passa_por_tradutor_e_fibra(montado):
     _, _, nl = montado
-    s = nl.sinais["CPU.DDR5_A_A_DQ0->DIMM0.DDR5_A_DQ0"] if "CPU.DDR5_A_A_DQ0->DIMM0.DDR5_A_DQ0" in nl.sinais \
+    s = nl.sinais["CPU.DDR5_A_A_DQ0->DIMM.DDR5_A_DQ0"] if "CPU.DDR5_A_A_DQ0->DIMM.DDR5_A_DQ0" in nl.sinais \
         else next(x for x in nl.sinais.values() if x.papel == "DQ" and x.protocolo == "DDR5-4800")
     for sentido in ("ida", "volta"):
         tipos = [nl.blocos[b].tipo for b, _ in s.caminhos[sentido]]
@@ -120,19 +120,20 @@ def test_requisitos_honestos(montado):
     # o chipset é quem atende a CPU e o SPD; o FPGA só orquestra a base
     assert req[("CPU", "PCH/DMI")] == req[("CPU", "sequenciamento-PWROK")] == "ctl:pch"
     assert req[("CPU", "BCLK")] == "clk:pch"
-    assert req[("DIMM0", "SPD/I3C")] == req[("DIMM1", "SPD/I3C")] == "ctl:pch"
+    assert req[("DIMM", "SPD/I3C")] == req[("PONTE", "SPD/I3C")] == "ctl:pch"
     assert req[("CPU", "firmware-UEFI")] == req[("PCH", "firmware-ME")] == "flash:uefi"
     assert nl.blocos["flash:uefi"].atributos["regioes"] == ["descritor", "ME", "BIOS"]
     assert "PCH/DMI" not in nl.blocos["ctl:fpga"].atributos["capacidades"]
-    assert req[("GPU", "memoria-compartilhada-CXL")] is None      # opcional: i5 e GPU sem CXL
+    # sem CXL nas pontas, quem dá a memória compartilhada é o banco unificado da base
+    assert req[("GPU", "memoria-compartilhada")] == req[("CPU", "memoria-compartilhada")] == "ctl:ponte"
+    mems = {b.atributos["peca"] for b in nl.por_tipo("mux_dono")}
+    assert len(mems) == 12 and all(req[(m, "posse-do-banco")] == "ctl:fpga" for m in mems)
     for ch in nl.por_tipo("chip_tradutor"):
         for cap in ("laser", "energia", "controle"):
             assert req.get((ch.id, cap)), (ch.id, cap)
         assert req[(ch.id, "controle")] == "ctl:fpga"
     # todo provedor declara o que oferece
     for r in nl.requisitos:
-        if r.capacidade == "memoria-compartilhada-CXL":
-            continue
         assert r.provedor and r.capacidade in nl.blocos[r.provedor].atributos.get("capacidades", ()), r
 
 
@@ -167,7 +168,7 @@ def test_cada_entrada_de_relogio_tem_uma_fonte(montado):
 
 def test_spd_do_dimm_ao_pch_por_trilha_com_um_pullup(montado):
     _, _, nl = montado
-    for k, dimm in enumerate(("DIMM0", "DIMM1")):
+    for k, dimm in enumerate(("DIMM", "PONTE")):
         for pino in ("HSCL", "HSDA"):
             s = next(x for x in nl.sinais.values() if x.destino == (f"{dimm}:{pino}", "e"))
             assert s.origem == (f"PCH:SPD{k}_{pino}", "e"), s.id

@@ -14,7 +14,7 @@ from modulos.sistema.base import CODIGO, DESLIGADA
 from modulos.sistema.mapeamento import DESCONHECIDA
 
 APELIDO = {"i5-13600KF": "CPU", "DDR5-DIMM": "DIMM", "GPU": "GPU", "GDDR7": "MEM",
-           "FPGA": "FPGA"}
+           "FPGA": "FPGA", "PONTE-MEM": "PONTE"}
 
 CORRENTE_POR_CONTATO_A = 1.0     # "cerca de 1 A por contato", do conceito
 FATOR_CONCENTRACAO = 1.7         # pico/média por pino no VCCIN com plano de 2 oz (0,88/0,53 A)

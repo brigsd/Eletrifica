@@ -64,7 +64,8 @@ def calcular(plano, atraso_eletro_optico_ps=100.0, n_g=1.468, dispersao_ps_nm_km
     por_canal = np.empty(len(plano.canais))
     for i, c in enumerate(plano.canais):
         f = plano.fibras[c.fibra]
-        L_mm = f.distancia_ate[c.destino]
+        # rank > 0: a luz para no tradutor do chip do rank 0; dali é trilha curta até o vizinho
+        L_mm = f.distancia_ate[c.destino if c.destino in f.distancia_ate else c.lider]
         disp = dispersao_ps_nm_km * (L_mm * 1e-6) * c.lambda_idx * espacamento_nm
         por_canal[i] = eo[i] + L_mm * n_g / C_MM_PS + disp
 

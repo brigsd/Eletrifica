@@ -19,6 +19,7 @@ from modulos.dados import comandos as CMD
 from modulos.dados import ddr5 as DDR
 from modulos.dados import emulador as DE
 from modulos.dados import memoria_compartilhada as MC
+from modulos.dados import memoria_unificada as MU
 from modulos.dados import pcie as PCIE
 from modulos.dados import latencia as DL
 from modulos.dados import roteamento as DR
@@ -70,7 +71,11 @@ def _contatos(m, cfg, nome_chave, cobre_oz):
 
 
 def _fibras_netlist(nl):
-    """Fibras de dados (entre chips tradutores) e de laser (do módulo ao chip)."""
+    """Fibras de dados (entre chips tradutores) e de laser (do módulo ao chip). As da ponte do
+    banco unificado aparecem como BANCO."""
+    pontes = {b.atributos.get("peca") for b in nl.por_tipo("controlador")
+              if "DIMM-emulado" in b.atributos.get("capacidades", ())}
+    da_ponte = lambda bid: bid in nl.blocos and nl.blocos[bid].atributos.get("peca") in pontes
     out = []
     for k, f in enumerate(nl.por_tipo("fibra")):
         a = f.atributos
@@ -85,7 +90,10 @@ def _fibras_netlist(nl):
         pts = [[*rota[0], 1.0]] + [[x, y, alto] for x, y in rota[1:-1]] + [[*rota[-1], 1.0]]
         if len(pts) == 2:
             pts.insert(1, [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2, alto])
-        out.append({"id": f.id, "tipo": "LASER" if laser else TIPO_FIBRA.get(a.get("protocolo"), "AUX"),
+        tipo = "LASER" if laser else TIPO_FIBRA.get(a.get("protocolo"), "AUX")
+        if not laser and (da_ponte(a.get("de")) or da_ponte(a.get("para"))):
+            tipo = "BANCO"
+        out.append({"id": f.id, "tipo": tipo,
                     "de": a.get("de"), "para": a.get("para"),
                     "canais": len(a.get("lambdas_nm", [])), "raio": 0.35 if laser else 0.7,
                     "comprimento_mm": round(float(a.get("comprimento_mm", 0.0)), 1),
@@ -189,18 +197,20 @@ def executar():
                                 "comutacao": e.comutacao}
                      for e in lat.enlaces}
     olho = canais["DDR5"].largura_olho_ui
-    treinos = {d: DE.treinar(plano, lat, f"CPU-{d}", largura_olho_ui=olho) for d in ("DIMM0", "DIMM1")}
+    ddr = [e.b for e in plano.enlaces if e.protocolo == "DDR5-4800"]      # o DIMM e a ponte do banco
+    treinos = {d: DE.treinar(plano, lat, f"CPU-{d}", largura_olho_ui=olho) for d in ddr}
     movido = copy.deepcopy(cfg)
-    movido.por_nome("DIMM0").y += 10.0
+    movido.por_nome(ddr[0]).y += 10.0
     p2 = DR.rotear(movido, canais_por_fibra=viavel["canais_por_fibra"])
-    quebra = DE.verificar(treinos["DIMM0"], p2, DL.calcular(p2, atraso_eletro_optico_ps=eo), olho)
+    quebra = DE.verificar(treinos[ddr[0]], p2, DL.calcular(p2, atraso_eletro_optico_ps=eo), olho)
+    quebra["peca"] = ddr[0]
     modelo_ddr5 = DE.canal_ideal(canais["DDR5"].ber_estimada)
     modelo_g7 = DE.canal_ideal(canais["GDDR7"].ber_estimada)
     dados = bytes(range(64))
-    raj = {"DDR5 escrita": DE.rajada_ddr5(plano, "CPU-DIMM0", "escrita", dados, modelo=modelo_ddr5),
-           "DDR5 leitura": DE.rajada_ddr5(plano, "CPU-DIMM1", "leitura", dados, modelo=modelo_ddr5),
-           "GDDR7 escrita": DE.rajada_gddr7(plano, plano.enlaces[2].id, "escrita", dados[:48],
-                                            modelo=modelo_g7)}
+    g7 = next(e.id for e in plano.enlaces if e.id.startswith("GPU-MEM"))
+    raj = {"DDR5 escrita": DE.rajada_ddr5(plano, f"CPU-{ddr[0]}", "escrita", dados, modelo=modelo_ddr5),
+           "DDR5 leitura": DE.rajada_ddr5(plano, f"CPU-{ddr[-1]}", "leitura", dados, modelo=modelo_ddr5),
+           "GDDR7 escrita": DE.rajada_gddr7(plano, g7, "escrita", dados[:48], modelo=modelo_g7)}
     R["treino"] = {d: {"ok": t.convergiu, "pistas": len(t.pistas),
                        "janela_min_taps": min(p["janela_taps"] for p in t.pistas.values()),
                        "passo_ps": t.passo_ps} for d, t in treinos.items()}
@@ -254,6 +264,14 @@ def executar():
         "pcie": PCIE.avaliar_netlist(nl),
         "memoria": MC.comparar(nl)}
     R["boot"] = {"ok": ex.ok, "parou_em": ex.parou_em, "tempos_ms": {k: v / 1e3 for k, v in ex.tempos.items()}}
+    if "ctl:ponte" in nl.blocos:
+        a = nl.blocos["ctl:ponte"].atributos
+        R["banco"] = {**MU.simular(ida_ns=a["ida_ps"] / 1000, volta_ns=a["volta_ps"] / 1000),
+                      "ponte": {k: a[k] for k in ("cl_declarado", "trcd_declarado", "janela_gb", "ranks",
+                                                  "chips", "ida_ps", "volta_ps")},
+                      "blocos": {t: len(nl.por_tipo(t)) for t in ("seletor_rank", "mux_dono", "detector_rank")},
+                      "erros": {r: R["netlist"]["por_regra"][r] for r in ("R19-posse", "R20-banco")},
+                      "t_ms": R["boot"]["tempos_ms"].get("Banco unificado")}
 
     # cena 3D ---------------------------------------------------------------------
     corrente = dist["mapa_corrente"]
@@ -397,7 +415,8 @@ NOME_REGRA = {"R01-caminho": "caminho", "R02-sentido": "sentido", "R03-padrao": 
               "R10-relogio": "relógio", "R11-requisito": "requisito", "R12-orfao": "órfão",
               "R13-temperatura": "temperatura", "R14-consumo": "consumo",
               "R15-decodificacao": "decodificação", "R16-ajuste": "ajuste elétrico",
-              "R17-pcie": "PCIe", "R18-memoria-compartilhada": "memória compartilhada"}
+              "R17-pcie": "PCIe", "R18-memoria-compartilhada": "memória compartilhada",
+              "R19-posse": "posse do banco", "R20-banco": "banco unificado"}
 
 
 def _secao_conexoes(R):
@@ -407,7 +426,7 @@ def _secao_conexoes(R):
          f"modulador → fibra → filtro → receptor → driver de saída → trilha → célula → pino, "
          f"com laser, alimentação, controle e relógio de cada bloco ativo. São "
          f"{nlr['blocos']} blocos, {nlr['ligacoes']} ligações e {nlr['sinais']} sinais. "
-         "O verificador (`modulos/conexoes/verificador.py`) confere 12 regras.", "",
+         f"O verificador (`modulos/conexoes/verificador.py`) confere {len(REGRAS)} regras.", "",
          "Erros por regra, do conceito até o projeto atual:", "",
          "| Regra | " + " | ".join(c["nome"] for c in cen) + " |",
          "|---|" + "---|" * len(cen)]
@@ -468,16 +487,67 @@ def _secao_conexoes(R):
           f"largura; com um tradutor idealmente linear seria {pc['olho_linear']['altura_rel']:.2f} e "
           f"{pc['olho_linear']['largura_ui']:.2f} UI — a não linearidade do anel quase não pesa em NRZ.", ""]
     mem = pr["memoria"]
-    L += ["### Memória compartilhada", "",
-          "O conceito pede memória compartilhada mediada pelo FPGA via CXL. Nem a i5-13600KF nem a GPU "
-          "suportam CXL, então isso não fecha com estas peças (aviso da regra R18). O que funciona hoje "
-          "é a CPU enxergar a GDDR7 pelo PCIe com BAR redimensionável:", "",
+    L += ["### Memória compartilhada vista pela CPU", "",
+          "Nem a i5-13600KF nem a GPU têm CXL. Com o banco unificado da base (seção seguinte), a CPU "
+          "lê os mesmos chips da GPU pelo próprio canal DDR5, como RAM comum; o ReBAR pelo PCIe "
+          "continua existindo:", "",
           "| Opção | Banda | Latência | Coerente |", "|---|---|---|---|"]
     for x in mem.values():
         nota = "" if x["nesta_montagem"] else " (não dá nesta montagem)"
-        L.append(f"| {x['nome']}{nota} | {x['banda_gb_s']:.0f} GB/s | {x['latencia_ns']:.0f} ns | "
-                 f"{'sim' if x['coerente'] else 'não'} |")
-    return L + [""]
+        coer = x["coerente"] if isinstance(x["coerente"], str) else ("sim" if x["coerente"] else "não")
+        L.append(f"| {x['nome']}{nota} | {x['banda_gb_s']:.0f} GB/s | {x['latencia_ns']:.0f} ns | {coer} |")
+    return L + [""] + _secao_banco(R)
+
+
+def _secao_banco(R):
+    b = R.get("banco")
+    if not b:
+        return []
+    cap, cal, lat, ig = b["capacidade"], b["calibracao"], b["latencia"], b["integridade"]
+    sp, po, pt, bl = b["sem_protocolo"], b["posse"], b["ponte"], b["blocos"]
+    L = ["## Banco unificado — CPU e GPU na mesma memória", "",
+         "A GPU só tem uma porta rápida, a de memória; o PCIe até a CPU é o barramento lento do "
+         "offloading. Então o banco compartilhado entra pela porta de memória da GPU. A base está no "
+         "meio de cada pino e faz o que uma placa-mãe não faz (`modulos/dados/memoria_unificada.py`):", "",
+         f"- **Mais chips por canal.** {cap['chips']} chips GDDR7 de {cap['chip_visto_gb'] / pt['ranks'] * 8:.0f} Gb; "
+         f"a GPU enxerga {cap['chips'] // pt['ranks']} chips de {cap['chip_visto_gb'] * 8:.0f} Gb (o maior do "
+         f"padrão), cada um feito de {pt['ranks']} vizinhos. O seletor do grupo escolhe o chip pelo "
+         f"comando, como num LRDIMM: {bl['seletor_rank']} seletores, {bl['detector_rank']} detectores, "
+         f"e uma linha de atraso em cada porta deixa os chips do grupo chegando juntos.",
+         f"- **A CPU nos mesmos chips.** Um canal DDR5 da CPU vai para a ponte, que se apresenta como um "
+         f"DIMM de {pt['janela_gb']:.0f} GB e declara CL{pt['cl_declarado']} no SPD (o DDR5 aceita até "
+         f"CL{lat['cl_max']}; a leitura pela ponte leva {lat['leitura_ns']:.1f} ns, com "
+         f"{pt['ida_ps'] / 1000:.2f} ns de caminho até os chips e {pt['volta_ps'] / 1000:.2f} ns de volta).",
+         f"- **Um dono por rank.** {bl['mux_dono']} muxes de posse, comandados pelo FPGA; enquanto um rank "
+         f"é da CPU, a base absorve ~{po['refresh_absorvidos_por_s'] / 1e6:.1f} milhões de refresh por "
+         f"segundo que a GPU manda para ele.",
+         f"- **Mesmo endereço dos dois lados.** No boot a ponte aprende os dois mapas com "
+         f"{cal['sondas_gpu']} sondas da GPU e {cal['sondas_cpu']} da CPU e confere com "
+         f"{cal['conferencias']} sondas aleatórias de cada lado: **{cal['erros_gpu'] + cal['erros_cpu']} "
+         f"erros**; varrer o banco leva {cal['varredura_ms']:.1f} ms. Um mapa fora da família (rank "
+         f"misturado com bit baixo) {'é avisado' if not b['rank_misturado'] else 'passaria sem aviso'}.", "",
+         f"Netlist: R19 (posse) {b['erros']['R19-posse']} erros, R20 (banco) {b['erros']['R20-banco']} "
+         f"erros; boot com o banco pronto em {b['t_ms']:.0f} ms.", "",
+         "Emulação bit a bit:", "",
+         f"- A CPU grava {ig['linhas']} linhas pela ponte, entrega os ranks e a GPU lê: "
+         f"**{ig['erros']} erros**. A GPU grava {ig['linhas_volta']}, devolve e a CPU lê: "
+         f"**{ig['erros_volta']} erros**. Entregar um rank leva {ig['entrega_us']:.0f} µs.",
+         f"- Sem o protocolo de entrega (descarregar a cache antes de passar o rank): "
+         f"**{sp['lidas_velhas']} de {sp['linhas']}** linhas lidas velhas pela GPU.",
+         f"- Fora da posse: {po['gpu_recusadas']} acessos da GPU e {po['cpu_recusadas']} da CPU a um rank "
+         f"que não é deles, todos recusados.", "",
+         "LLM: cada token lê o modelo inteiro. Teto de tokens/s:", "",
+         "| Modelo | GB | PC comum, offload na CPU | Offload pelo PCIe | Banco unificado | Carga pela ponte |",
+         "|---|---|---|---|---|---|"]
+    for x in b["llm"]:
+        banco = f"**{x['banco']:.1f}**" if x["cabe_no_banco"] else f"{x['banco']:.1f} (não cabe)"
+        L.append(f"| {x['modelo']} | {x['gb']:.0f} | {x['offload_cpu']:.1f} | {x['offload_pcie']:.1f} | "
+                 f"{banco} | {x['carga_s']:.1f} s |")
+    L += ["", f"Offload: a mesma GPU com {cap['vram_nativa_gb']:.0f} GB de VRAM a {cap['banda_gpu_gbps']:.0f} "
+          f"GB/s, e o resto na RAM da CPU (dois canais DDR5, como num PC comum) ou lido pelo PCIe. Banco: {cap['banco_gb']:.0f} GB, todos a "
+          f"{cap['banda_gpu_gbps']:.0f} GB/s; o que passar disso cai no PCIe. A CPU grava o modelo direto "
+          f"no banco a {cap['banda_cpu_gbps']:.1f} GB/s, sem cópia pelo PCIe.", ""]
+    return L
 
 
 def _relatorio(R):
@@ -593,11 +663,13 @@ def _relatorio(R):
         vistos.add(chave)
         L.append(f"| {n} | {x['dados_ps']:.0f} ps | {x['trilha_ps']:.0f} ps | {x['trilha_tipica_ps']:.0f} ps |")
     t0, q = R["treino"], R["treino_apos_mover"]
+    d0 = q["peca"]
     L += ["",
-          f"- Treino DDR5: DIMM0 {'converge' if t0['DIMM0']['ok'] else 'falha'} "
-          f"({t0['DIMM0']['pistas']} pistas, janela mínima {t0['DIMM0']['janela_min_taps']} passos de "
-          f"{t0['DIMM0']['passo_ps']:.2f} ps), DIMM1 {'converge' if t0['DIMM1']['ok'] else 'falha'}.",
-          f"- Mover o DIMM0 10 mm depois de treinado: **{q['falhas']} de {q['pistas']} pistas** "
+          f"- Treino DDR5: {d0} {'converge' if t0[d0]['ok'] else 'falha'} "
+          f"({t0[d0]['pistas']} pistas, janela mínima {t0[d0]['janela_min_taps']} passos de "
+          f"{t0[d0]['passo_ps']:.2f} ps)"
+          + "".join(f", {d} {'converge' if t['ok'] else 'falha'}" for d, t in t0.items() if d != d0) + ".",
+          f"- Mover o {d0} 10 mm depois de treinado: **{q['falhas']} de {q['pistas']} pistas** "
           "saem do olho. Por isso a reconfiguração vem antes do treino.",
           "- Rajadas pelo canal simulado: " + ", ".join(
               f"{k} {'sem erro' if r['erros_bits'] == 0 else str(r['erros_bits']) + ' bits errados'}"

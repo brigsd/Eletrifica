@@ -8,7 +8,7 @@ def test_parametros_valem_so_na_chamada(sistema_real):
     m, cfg, plano, opt = sistema_real
     antes = K.VIAS_MAX
     poucas = K.construir(m, cfg, plano, opt, chave="rele_mems", posicionamento="sob_peca",
-                         parametros={"VIAS_MAX": 60})
+                         parametros={"VIAS_MAX": 80})
     assert K.VIAS_MAX == antes
     normal = K.construir(m, cfg, plano, opt, chave="rele_mems", posicionamento="sob_peca")
     n_chips = lambda nl: len(nl.por_tipo("chip_tradutor"))

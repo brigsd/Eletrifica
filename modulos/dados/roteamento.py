@@ -41,6 +41,10 @@ class Canal:
     grupo: str
     fibra: int = -1
     lambda_idx: int = -1
+    canal_mem: str = ""     # canal GDDR7 do controlador (G0..G11) quando há mais de um chip por canal
+    rank: int = 0
+    lider: str = ""         # chip do rank 0 do canal: o tradutor do grupo fica sob ele
+    sombra_de: int = -1     # rank > 0: usa a luz do canal do rank 0 (o seletor do grupo escolhe o chip)
 
     @property
     def dados(self):
@@ -177,6 +181,8 @@ def _grupo(prefixo, nome, papel_):
         return f"{prefixo}_B{num}"
     if papel_ in ("CA", "CS", "CK", "WCK"):          # RESET é estático: fica fora do grupo
         return f"{prefixo}_CTRL"
+    if papel_ == "EDC":
+        return f"{prefixo}_EDC"
     return nome
 
 
@@ -195,7 +201,7 @@ def _sinais_enlace(mapa):
     return out
 
 
-def _canais(enlace_id, a, b, sinais, modo):
+def _canais(enlace_id, a, b, sinais, modo, canal_mem="", rank=0, lider=""):
     out = []
     for pa, pb, sentido, prot, p, grupo in sinais:
         pr = PROTOCOLOS[prot]
@@ -205,7 +211,8 @@ def _canais(enlace_id, a, b, sinais, modo):
         cod = pr.codificacao if dados else "NRZ"
         sentidos = ["ida", "volta"] if (sentido == "duplo" and modo == "dedicado") else [sentido]
         for s in sentidos:
-            out.append(Canal(enlace_id, a, b, pa, pb, s, prot, p, taxa, taxa / bps, cod, grupo))
+            out.append(Canal(enlace_id, a, b, pa, pb, s, prot, p, taxa, taxa / bps, cod, grupo,
+                             canal_mem=canal_mem, rank=rank, lider=lider))
     return out
 
 
@@ -214,7 +221,7 @@ def _enlaces(cfg):
     """Monta os enlaces lógicos e decide as atribuições."""
     pecas = {p.nome: p for p in cfg.pecas}
     cpu, gpu, fpga = pecas["CPU"], pecas["GPU"], pecas["FPGA"]
-    dimms = sorted(n for n in pecas if n.startswith("DIMM"))
+    dimms = sorted(n for n, p in pecas.items() if n != "CPU" and "DDR5" in p.peca.interfaces)
     mems = sorted((n for n in pecas if n.startswith("MEM")), key=lambda n: int(n[3:]))
     enlaces = []
 
@@ -236,13 +243,42 @@ def _enlaces(cfg):
                 key=lambda g: int(g[1:]))
     sinais_g = {g: [s for s in gpu.peca.interfaces["GDDR7"].sinais if s.startswith(g + "_")]
                 for g in gs}
-    custo = np.array([[np.hypot(*(_centroide(gpu, sinais_g[g]) - np.array([pecas[m].x, pecas[m].y])))
-                       for m in mems] for g in gs])
+    if len(mems) % len(gs):
+        raise ValueError(f"{len(mems)} chips GDDR7 não dividem por {len(gs)} canais")
+    ranks = len(mems) // len(gs)
+    xy = {m: np.array([pecas[m].x, pecas[m].y]) for m in mems}
+    # chips vizinhos formam o grupo de um canal (multiplicação de rank pela base, como num LRDIMM)
+    grupos, livres = [], set(mems)
+    while livres:
+        m = min(livres, key=lambda n: (min(np.hypot(*(xy[n] - xy[o])) for o in livres - {n})
+                                       if len(livres) > 1 else 0.0, n))
+        g = sorted(livres, key=lambda o: (np.hypot(*(xy[m] - xy[o])), o))[:ranks]
+        grupos.append(g)
+        livres -= set(g)
+    centro = [np.mean([xy[m] for m in g], axis=0) for g in grupos]
+    custo = np.array([[np.hypot(*(_centroide(gpu, sinais_g[c]) - centro[k])) for k in range(len(grupos))]
+                      for c in gs])
     linhas, colunas = linear_sum_assignment(custo)
+    chip_de = {}
     for i, j in zip(linhas, colunas):
-        g, m = gs[i], mems[j]
-        mapa = [(n, "GX_" + n.split("_", 1)[1], g, "GDDR7-32") for n in sinais_g[g]]
-        enlaces.append((f"GPU-{m}", "GPU", m, g, mapa))
+        # rank 0 é o chip mais perto do canal: é sob ele que fica o tradutor do grupo
+        ordem_g = sorted(grupos[j], key=lambda m: (np.hypot(*(_centroide(gpu, sinais_g[gs[i]]) - xy[m])), m))
+        for r, m in enumerate(ordem_g):
+            chip_de[(gs[i], r)] = m
+    controladores = [("GPU", sinais_g)]
+    ponte = next((n for n, p in pecas.items() if p.tipo == "PONTE-MEM"), None)
+    if ponte:
+        # a ponte fala com os mesmos chips, na mesma posição de canal e rank que a GPU;
+        # o RESET dos chips é só da GPU
+        sp = pecas[ponte].peca.interfaces["GDDR7"].sinais
+        controladores.append((ponte, {g: [s for s in sp if s.startswith(g + "_") and papel(s) != "RESET"]
+                                      for g in gs}))
+    for nome_c, sinais_c in controladores:
+        for (g, r), m in sorted(chip_de.items(), key=lambda kv: (int(kv[0][0][1:]), kv[0][1])):
+            prefixo = g if nome_c == "GPU" else f"{nome_c}.{g}"      # grupos síncronos por controlador
+            mapa = [(n, "GX_" + n.split("_", 1)[1], prefixo, "GDDR7-32") for n in sinais_c[g]]
+            extra = (g, r, chip_de[(g, 0)]) if ranks > 1 else ("", 0, "")
+            enlaces.append((f"{nome_c}-{m}", nome_c, m, g, mapa, extra))
 
     # relógios de referência não viajam com os dados: vêm do gerador de relógio da base
     mapa = [(n, n, "PEG", "PCIe5") for n in cpu.peca.interfaces["PEG"].sinais if not _relogio(n)]
@@ -307,9 +343,9 @@ def rotear(configuracao, canais_por_fibra=64, modo_bidirecional="comutado",
         raise ValueError(topologia)
     pecas = {p.nome: p for p in configuracao.pecas}
     canais, enlaces = [], []
-    for eid, a, b, _interface, mapa in _enlaces(configuracao):
+    for eid, a, b, _interface, mapa, *rank in _enlaces(configuracao):
         sinais = _sinais_enlace(mapa)
-        novos = _canais(eid, a, b, sinais, modo_bidirecional)
+        novos = _canais(eid, a, b, sinais, modo_bidirecional, *(rank[0] if rank else ()))
         e = Enlace(eid, a, b, mapa[0][3], list(range(len(canais), len(canais) + len(novos))))
         pa, pb = pecas[a], pecas[b]
         e.tradutor_a = tradutor(pa, (pb.x, pb.y))[0]
@@ -317,10 +353,19 @@ def rotear(configuracao, canais_por_fibra=64, modo_bidirecional="comutado",
         canais += novos
         enlaces.append(e)
 
+    # os chips de rank > 0 recebem a mesma luz do chip do rank 0 do canal
+    lider = {(c.origem, c.destino, c.pino_origem, c.sentido): i for i, c in enumerate(canais)
+             if c.canal_mem and c.rank == 0}
+    for c in canais:
+        if c.canal_mem and c.rank > 0:
+            c.sombra_de = lider[(c.origem, c.lider, c.pino_origem, c.sentido)]
+
     # canais que compartilham fibra: mesmo hub, família do enlace, sentido e classe
     familia = {e.id: e.protocolo for e in enlaces}
     pools = {}
     for i, c in enumerate(canais):
+        if c.sombra_de >= 0:
+            continue
         classe = "dados" if c.papel in PAPEIS_BARRAMENTO else "controle"
         chave = ((c.origem, familia[c.enlace]) if topologia == "barramento" else (c.enlace,)) \
             + (c.sentido, classe)
@@ -332,13 +377,19 @@ def rotear(configuracao, canais_por_fibra=64, modo_bidirecional="comutado",
         destinos = sorted({canais[i].destino for i in idx})
         ph = pecas[hub]
         # ordem de visita: vizinho mais próximo a partir do hub
+        # com vários chips por canal, os chips do mesmo canal ficam juntos (rank 0, rank 1...)
+        canal_de = {canais[i].destino: (canais[i].canal_mem, canais[i].rank) for i in idx}
+        blocos = {}
+        for d in destinos:
+            blocos.setdefault(canal_de[d][0] or d, []).append(d)
+        centro = {k: np.mean([(pecas[d].x, pecas[d].y) for d in v], axis=0) for k, v in blocos.items()}
         ordem, pos = [], (ph.x, ph.y)
-        resto = list(destinos)
+        resto = list(blocos)
         while resto:
-            prox = min(resto, key=lambda d: math.hypot(pecas[d].x - pos[0], pecas[d].y - pos[1]))
-            ordem.append(prox)
+            prox = min(resto, key=lambda k: math.hypot(centro[k][0] - pos[0], centro[k][1] - pos[1]))
+            ordem += sorted(blocos[prox], key=lambda d: canal_de[d][1])
             resto.remove(prox)
-            pos = (pecas[prox].x, pecas[prox].y)
+            pos = tuple(centro[prox])
         for grupo_fibra in _empacotar(idx, canais, canais_por_fibra, ordem):
             dests = [d for d in ordem if any(canais[i].destino == d for i in grupo_fibra)]
             f = Fibra(len(fibras), hub, dests, chave[-2], chave[-1],
@@ -359,5 +410,8 @@ def rotear(configuracao, canais_por_fibra=64, modo_bidirecional="comutado",
                 f.canais.append(i)
             fibras.append(f)
 
+    for c in canais:
+        if c.sombra_de >= 0:
+            c.fibra, c.lambda_idx = canais[c.sombra_de].fibra, canais[c.sombra_de].lambda_idx
     poses = {p.nome: (p.x, p.y, p.rot) for p in configuracao.pecas}
     return Plano(enlaces, canais, fibras, canais_por_fibra, modo_bidirecional, topologia, poses)

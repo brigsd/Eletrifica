@@ -4,7 +4,7 @@
   "pecas": [
     {"id": "CPU",   "tipo": "i5-13600KF", "x": 120.0, "y": 130.0, "rot": 0.6},
     {"id": "DIMM_A", "tipo": "DDR5-DIMM", "x": 215.0, "y": 140.0, "rot": 90.4},
-    {"id": "DIMM_B", "tipo": "DDR5-DIMM", "x": 250.0, "y": 140.0, "rot": 89.7},
+    {"id": "PONTE", "tipo": "PONTE-MEM", "x": 172.0, "y": 140.0, "rot": 0.4},
     {"id": "GPU",   "tipo": "GPU",        "x": 110.0, "y": 60.0,  "rot": 180.3},
     {"id": "M0",  "tipo": "GDDR7", "x": 75.0,  "y": 42.0, "rot": 0.0},
     {"id": "M1",  "tipo": "GDDR7", "x": 75.0,  "y": 57.0, "rot": 0.4},
@@ -18,6 +18,18 @@
     {"id": "M9",  "tipo": "GDDR7", "x": 132.0, "y": 22.0, "rot": 90.0},
     {"id": "M10", "tipo": "GDDR7", "x": 95.0,  "y": 95.0, "rot": 270.0},
     {"id": "M11", "tipo": "GDDR7", "x": 125.0, "y": 95.0, "rot": 270.3},
+    {"id": "M12", "tipo": "GDDR7", "x": 61.0, "y": 42.0, "rot": 0.2},
+    {"id": "M13", "tipo": "GDDR7", "x": 61.0, "y": 57.0, "rot": 359.6},
+    {"id": "M14", "tipo": "GDDR7", "x": 61.0, "y": 72.0, "rot": 0.5},
+    {"id": "M15", "tipo": "GDDR7", "x": 159.0, "y": 42.0, "rot": 180.4},
+    {"id": "M16", "tipo": "GDDR7", "x": 159.0, "y": 57.0, "rot": 179.7},
+    {"id": "M17", "tipo": "GDDR7", "x": 159.0, "y": 72.0, "rot": 180.3},
+    {"id": "M18", "tipo": "GDDR7", "x": 87.0, "y": 8.0, "rot": 90.2},
+    {"id": "M19", "tipo": "GDDR7", "x": 102.0, "y": 8.0, "rot": 269.8},
+    {"id": "M20", "tipo": "GDDR7", "x": 117.0, "y": 8.0, "rot": 90.0},
+    {"id": "M21", "tipo": "GDDR7", "x": 132.0, "y": 8.0, "rot": 89.5},
+    {"id": "M22", "tipo": "GDDR7", "x": 80.0, "y": 95.0, "rot": 270.0},
+    {"id": "M23", "tipo": "GDDR7", "x": 140.0, "y": 95.0, "rot": 270.4},
     {"id": "FPGA", "tipo": "FPGA",        "x": 40.0,  "y": 190.0, "rot": 270.2},
     {"id": "PCH",  "tipo": "PCH",         "x": 150.0, "y": 205.0, "rot": 37.0}
   ],
@@ -27,7 +39,8 @@
     "cobre_plano_oz": 2,
     "placa_fria_h_w_m2k": 1000,
     "vias_termicas_fracao": 0.05,
-    "config_optica": "viavel"
+    "config_optica": "viavel",
+    "memoria": "unificada"
   },
   "zonas": {
     "vrm_cpu": {"x0": 72, "y0": 112, "x1": 94, "y1": 148, "fases": 8},
