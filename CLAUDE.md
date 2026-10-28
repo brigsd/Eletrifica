@@ -211,10 +211,16 @@ Resultados atuais (confira rodando, não confie nestes números):
   placa fria sob a base com vias térmicas em 5 % da área): 0 erros, e o boot
   emulado fica pronto em ~490 ms. Placa fria e vias térmicas: aceitas pelo dono
   (2026-10-28) desde que funcionem na prática; sem as vias, não fecham.
-- A interconexão dissipa ~88 W dentro da base; só com ar a base chega a
-  ~200 °C. Com a placa fria, ~57 °C. Consumo ~97 W, ~6,5 pJ/bit.
+- Os números realistas de `docs/viabilidade.md` já estão no modelo: anel de
+  25 pm/V, 2,5 pJ/bit por lado no tradutor, canais a ~200 GHz e ReBAR a
+  ~1.200 ns. Em `enlace.json`, `anel` e `filtro` de uma configuração mesclam
+  com os de `comum`.
+- A interconexão dissipa ~118 W dentro da base; só com ar a base chega a
+  ~255 °C. Com a placa fria, ~67 °C. Consumo ~130 W, ~8,8 pJ/bit: acima dos
+  ~6,3 de uma ligação elétrica (aviso R14).
 - 64 λ por fibra **não fecha** no modelo físico (diafonia); a configuração
-  `viavel` (16 λ/fibra, 4 canais por laser) dá ~+2,9 dB em PAM3.
+  `viavel` (16 λ/fibra a ~200 GHz, anel de raio 3,5 µm, 4 canais por laser) dá
+  ~+1,3 dB em PAM3. Com 1 laser para cada 2 canais iria a ~+4,3 dB.
 - Controle térmico por anel é obrigatório (< 1 K de janela sem ele).
 - A 200 A com plano de 1 oz, ~21 pinos de VCCIN passam de 1 A; com 2 oz, nenhum.
 

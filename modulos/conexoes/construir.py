@@ -28,8 +28,8 @@ VIAS_MAX = 96                 # vias (tx + rx) por chip
 CHIP_MM = (10.0, 10.0)
 AFASTAMENTO_CHIP_MM = 2.0     # da borda da peça até a borda do chip
 VDD_CHIP_V = 0.9
-PJ_BIT_TX = 1.5               # driver + modulador
-PJ_BIT_RX = 1.5               # fotodetector + TIA + driver de saída
+PJ_BIT_TX = 2.5               # driver + modulador (docs/viabilidade.md)
+PJ_BIT_RX = 2.5               # fotodetector + TIA + driver de saída
 AQUECEDOR_MW = 3.0            # médio por anel (modulador ou filtro)
 CONTROLE_CHIP_W = 0.15        # lógica de travamento, DACs e ADCs dos anéis
 

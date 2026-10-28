@@ -24,7 +24,8 @@ ARQUIVO = PROJETOS / "interconexao-optica" / "enlace.json"
 def carregar(nome="ajustada", caminho=None):
     data = json.loads((caminho or ARQUIVO).read_text())
     cfg = copy.deepcopy(data["comum"])
-    cfg.update(copy.deepcopy(data[nome]))
+    for k, v in copy.deepcopy(data[nome]).items():     # dicionários (anel, filtro) mesclam
+        cfg[k] = {**cfg[k], **v} if isinstance(v, dict) and isinstance(cfg.get(k), dict) else v
     cfg["nome"] = nome
     return cfg
 

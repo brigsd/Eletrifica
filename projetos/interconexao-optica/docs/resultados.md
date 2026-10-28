@@ -23,67 +23,67 @@ Conceito em [`conceito.md`](conceito.md). Visualizador 3D em [`../index.html`](.
 
 ## Temperatura da base
 
-A interconexão dissipa **88 W** dentro da própria base (chips tradutores e lasers). Só com o ar do gabinete a base chegaria a 199 °C. Com a placa fria sob a base (1000 W/m²K, líquido a 35 °C) e vias térmicas de cobre em 5% da área atravessando o LCP (troca efetiva 952 W/m²K), em carga máxima a base chega a **58 °C**. Sem as vias, o LCP de 1 mm segura o calor e a placa fria sozinha não basta.
+A interconexão dissipa **118 W** dentro da própria base (chips tradutores e lasers). Só com o ar do gabinete a base chegaria a 255 °C. Com a placa fria sob a base (1000 W/m²K, líquido a 35 °C) e vias térmicas de cobre em 5% da área atravessando o LCP (troca efetiva 952 W/m²K), em carga máxima a base chega a **67 °C**. Sem as vias, o LCP de 1 mm segura o calor e a placa fria sozinha não basta.
 
-- Aquecedor dos anéis: o local mais exigente pede 3,06 nm de sintonia; o aquecedor dá 4,00 nm. 0 chips sem faixa. A frio, os aquecedores gastam 16,6 W.
-- Consumo da interconexão: **97 W**, 6,6 pJ/bit sobre 14,8 Tb/s; uma ligação elétrica inteira custa ~6,3 pJ/bit. Partes: tradutores 50,9 W, controle das células 0,0 W, lasers 29,6 W, aquecedores (pior caso) 16,6 W.
+- Aquecedor dos anéis: o local mais exigente pede 3,58 nm de sintonia; o aquecedor dá 4,00 nm. 0 chips sem faixa. A frio, os aquecedores gastam 19,1 W.
+- Consumo da interconexão: **130 W**, 8,8 pJ/bit sobre 14,8 Tb/s; uma ligação elétrica inteira custa ~6,3 pJ/bit. Partes: tradutores 81,3 W, controle das células 0,0 W, lasers 29,6 W, aquecedores (pior caso) 19,1 W.
 
 Nos tradutores ópticos:
 
 | Peça | °C |
 |---|---|
-| CPU | 42,4 |
+| CPU | 44,2 |
 | DIMM0 | 35,2 |
-| DIMM1 | 35,5 |
+| DIMM1 | 35,6 |
 | FPGA | 37,6 |
-| GPU | 48,3 |
-| MEM0 | 43,7 |
-| MEM1 | 47,3 |
-| MEM2 | 46,5 |
-| MEM3 | 43,0 |
-| MEM4 | 45,8 |
-| MEM5 | 43,4 |
-| MEM6 | 43,7 |
-| MEM7 | 45,0 |
-| MEM8 | 42,7 |
-| MEM9 | 43,2 |
-| MEM10 | 47,0 |
-| MEM11 | 45,8 |
-| PCH | 36,6 |
+| GPU | 53,0 |
+| MEM0 | 46,0 |
+| MEM1 | 51,2 |
+| MEM2 | 50,5 |
+| MEM3 | 45,1 |
+| MEM4 | 49,4 |
+| MEM5 | 45,6 |
+| MEM6 | 46,0 |
+| MEM7 | 48,3 |
+| MEM8 | 44,7 |
+| MEM9 | 45,5 |
+| MEM10 | 50,9 |
+| MEM11 | 49,3 |
+| PCH | 36,8 |
 
 ## Etapa 4 — enlace óptico
 
 | Configuração | Cálculo do documento | Modelo físico | BER |
 |---|---|---|---|
-| original | -6,06 dB | não fecha | 3,9e-01 |
-| ajustada | +2,46 dB | não fecha | 2,2e-01 |
-| viável | +8,48 dB | +2,85 dB | 8,0e-25 |
+| original | -6,06 dB | não fecha | 4,1e-01 |
+| ajustada | +2,46 dB | não fecha | 2,5e-01 |
+| viável | +8,48 dB | +1,27 dB | 1,3e-17 |
 
-- **64 comprimentos de onda por fibra não fecham.** Com anel de 10 µm o FSR é 13 nm; 64 canais ficam a 0,2 nm, menos que a largura do filtro. A soma do vazamento dos vizinhos fica do tamanho do sinal, e a BER trava num piso que mais potência não remove.
-- **Configuração viável:** 16 λ por fibra e 1 laser de 10 mW para cada 4 canais.
+- **64 comprimentos de onda por fibra não fecham.** Com anel de raio 5,0 µm o FSR é 13 nm; os canais ficam a 0,2 nm, menos que a largura do filtro. A soma do vazamento dos vizinhos fica do tamanho do sinal, e a BER trava num piso que mais potência não remove.
+- **Configuração viável:** 16 λ por fibra a 1,16 nm (~203 GHz), anel de raio 3,5 µm (FSR 18,6 nm), 25 pm/V e 1 laser de 10 mW para cada 4 canais.
 
 Varredura da configuração ajustada (margem em PAM3, dB):
 
 | Raio | 8 λ | 16 λ | 32 λ | 64 λ |
 |---|---|---|---|---|
-| 5,0 µm | -2,58 | -3,17 | não fecha | não fecha |
-| 3,5 µm | -2,52 | -2,73 | -4,87 | não fecha |
-| 2,5 µm | -2,49 | -2,58 | -3,16 | não fecha |
+| 5,0 µm | -4,60 | -5,21 | não fecha | não fecha |
+| 3,5 µm | -4,54 | -4,75 | -6,94 | não fecha |
+| 2,5 µm | -4,51 | -4,60 | -5,20 | não fecha |
 
 Canais simulados no tempo (configuração viável):
 
 | Sinal | BER | erros / bits | atraso eletro-óptico | olho |
 |---|---|---|---|---|
-| GDDR7 | 1,2e-21 | 0 / 5952 | 32 ps | 0,31 UI |
-| PCIe5 | < 1e-30 | 0 / 3968 | 25 ps | 0,44 UI |
+| GDDR7 | 3,0e-14 | 0 / 5952 | 32 ps | 0,25 UI |
+| PCIe5 | 4,9e-30 | 0 / 3968 | 25 ps | 0,44 UI |
 | DDR5 | < 1e-30 | 0 / 3968 | 117 ps | 0,56 UI |
 
 ![Olho GDDR7](olho-gddr7.svg)
 
 ### Controle térmico dos anéis
 
-- Sem controle o enlace aguenta **1,00 K** (NRZ) e **0,54 K** (PAM3) antes de perder a BER alvo.
-- Com controle: trava em 200 µs; sob +10 K o erro máximo é 13,3 pm e o residual 0,05 pm. Sem controle chega a 561 pm.
+- Sem controle o enlace aguenta **0,88 K** (NRZ) e **0,38 K** (PAM3) antes de perder a BER alvo.
+- Com controle: trava em 200 µs; sob +10 K o erro máximo é 12,9 pm e o residual 0,05 pm. Sem controle chega a 561 pm.
 
 ![Controle térmico](controle-termico.svg)
 
@@ -98,15 +98,15 @@ Erros por regra, do conceito até o projeto atual:
 | banda | 2656 | 2518 | 0 | 0 | 0 | 0 |
 | energia | 1 | 1 | 1 | 0 | 0 | 0 |
 | tempo | 46 | 0 | 0 | 0 | 0 | 0 |
-| temperatura | 77 | 91 | 98 | 98 | 17 | 0 |
-| **total** | **2780** | **2610** | **99** | **98** | **17** | **0** |
+| temperatura | 85 | 98 | 98 | 98 | 42 | 0 |
+| **total** | **2788** | **2617** | **99** | **98** | **42** | **0** |
 
 O que cada decisão resolveu:
 
 - **banda** (conceito): cel:CPU:DDR5_A_A_DQ0: banda 0,1 GHz < 2,4 GHz de DDR5-DQ
 - **energia** (conceito): CPU:VCCIN: 21 pinos acima de 1 A (máx. 1,21 A)
 - **tempo** (conceito): GPU.G8_DQ16->MEM3.GX_DQ16 (ida): 1030 ps > 1000 ps
-- **temperatura** (conceito): peça MEM7 (GDDR7): 128,5 °C > 105 °C
+- **temperatura** (conceito): peça MEM7 (GDDR7): 151,5 °C > 105 °C
 
 - **Tradutor sob a peça:** com o chip ao lado, trilhas de até 120 mm na base estouram o atraso e o desalinhamento da GDDR7; numa camada de fotônica debaixo da peça, cada pino desce poucos milímetros até o seu chip.
 - **Relé MEMS na célula:** a célula do conceito usa a mesma chave para 1 A de energia e para sinal de 32 Gb/s. Uma chave de transistor com R_on baixo o bastante para a energia tem dezenas de pF desligada, e isso derruba a banda de todo sinal rápido. Um relé, quando aberto, é um vão de ar: 20 fF. Ele só pode mudar de estado sem corrente, e a configuração das células acontece antes de energizar.
@@ -141,7 +141,7 @@ Máquina de estados com guarda em cada transição (`modulos/sistema/boot.py`):
 
 - **Decodificação parcial.** Os dados são copiados sem decodificar. O comando, não: para saber o sentido dos pinos bidirecionais e acompanhar os ajustes elétricos, o tradutor decodifica MRR, RD, WR, MRW:5,32,33,34,35 na DDR5 e RD, RDTR, WR, WRTR, MRS:3,7,8 na GDDR7, e copia sem ler o resto (ACT, NOP, PREab, PREpb, REFab, VREFCA). Leva 1,3 ns na DDR5 contra 15 ns até o primeiro dado, e 1,2 ns na GDDR7 contra 9 ns.
 - **Ajustes dinâmicos da DDR5.** A CPU muda terminação e força de saída por MRW durante o uso. O tradutor de cada ponta espelha esses valores: com espelho, 0 de 10 comandos divergem; sem espelho, 8 de 10 (pior caso: programado 240 Ω, visto 40 Ω, -369 mV de amplitude).
-- **PCIe 5.** A detecção de receptor é controlada pelo FPGA (o tradutor só apresenta terminação com a GPU identificada e a luz travada) e o ocioso elétrico atravessa a luz. A equalização escolhe o preset P8 com CTLE de 2 dB: olho com 0,83 de altura e 0,84 UI de largura; com um tradutor idealmente linear seria 0,82 e 0,84 UI — a não linearidade do anel quase não pesa em NRZ.
+- **PCIe 5.** A detecção de receptor é controlada pelo FPGA (o tradutor só apresenta terminação com a GPU identificada e a luz travada) e o ocioso elétrico atravessa a luz. A equalização escolhe o preset P8 com CTLE de 2 dB: olho com 0,82 de altura e 0,84 UI de largura; com um tradutor idealmente linear seria 0,82 e 0,84 UI — a não linearidade do anel quase não pesa em NRZ.
 
 ### Memória compartilhada
 
@@ -149,7 +149,7 @@ O conceito pede memória compartilhada mediada pelo FPGA via CXL. Nem a i5-13600
 
 | Opção | Banda | Latência | Coerente |
 |---|---|---|---|
-| GPU vista pela CPU (ReBAR, PCIe 5 x16) | 55 GB/s | 801 ns | não |
+| GPU vista pela CPU (ReBAR, PCIe 5 x16) | 55 GB/s | 1201 ns | não |
 | DDR5 local (2 canais DDR5-4800) | 65 GB/s | 93 ns | sim |
 | Unificada no encapsulamento (LPDDR5X-8533, 128 bits) (não dá nesta montagem) | 116 GB/s | 110 ns | sim |
 

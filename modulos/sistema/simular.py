@@ -171,7 +171,11 @@ def executar():
 
     # 7. óptica -----------------------------------------------------------------
     cfgs = {n: E.carregar(n) for n in ("original", "ajustada", "viavel")}
-    R["optica"] = {n: {"simples": E.calculo_simples(c), "fisico": E.orcamento(c)}
+    R["optica"] = {n: {"simples": E.calculo_simples(c), "fisico": E.orcamento(c),
+                       "parametros": {"canais_por_fibra": c["canais_por_fibra"],
+                                      "lambdas_por_laser": c["lambdas_por_laser"],
+                                      "laser_mw": c["laser_mw"], "raio_um": c["anel"]["raio_um"],
+                                      "eficiencia_pm_v": c["anel"]["eficiencia_pm_v"]}}
                    for n, c in cfgs.items()}
     R["varredura"] = E.varrer(cfgs["ajustada"])
     viavel = cfgs[pj.get("config_optica", "viavel")]
@@ -330,6 +334,10 @@ def _virgulas(obj):
 
 
 NOME_CFG = {"original": "original", "ajustada": "ajustada", "viavel": "viável"}
+
+
+def _ghz(nm, lambda_nm=1310.0):
+    return 299792.458 * nm / lambda_nm ** 2 * 1e3
 
 
 def _estado(ok):
@@ -552,12 +560,17 @@ def _relatorio(R):
         f = o[n]["fisico"]
         mf = f"{f['margem_db']:+.2f} dB" if math.isfinite(f["margem_db"]) else "não fecha"
         L.append(f"| {NOME_CFG[n]} | {o[n]['simples']['margem_db']:+.2f} dB | {mf} | {_ber(f['ber'])} |")
+    fa, pv, fv = o["ajustada"]["fisico"], o["viavel"]["parametros"], o["viavel"]["fisico"]
     L += ["",
-          "- **64 comprimentos de onda por fibra não fecham.** Com anel de 10 µm o FSR é "
-          f"{13.0:.0f} nm; 64 canais ficam a 0,2 nm, menos que a largura do filtro. A soma do "
-          "vazamento dos vizinhos fica do tamanho do sinal, e a BER trava num piso que mais "
-          "potência não remove.",
-          "- **Configuração viável:** 16 λ por fibra e 1 laser de 10 mW para cada 4 canais.", "",
+          f"- **{o['ajustada']['parametros']['canais_por_fibra']} comprimentos de onda por fibra não "
+          f"fecham.** Com anel de raio {o['ajustada']['parametros']['raio_um']:.1f} µm o FSR é "
+          f"{fa['fsr_nm']:.0f} nm; os canais ficam a {fa['espacamento_nm']:.1f} nm, menos que a largura "
+          "do filtro. A soma do vazamento dos vizinhos fica do tamanho do sinal, e a BER trava num "
+          "piso que mais potência não remove.",
+          f"- **Configuração viável:** {pv['canais_por_fibra']} λ por fibra a "
+          f"{fv['espacamento_nm']:.2f} nm (~{_ghz(fv['espacamento_nm']):.0f} GHz), anel de raio "
+          f"{pv['raio_um']:.1f} µm (FSR {fv['fsr_nm']:.1f} nm), {pv['eficiencia_pm_v']:.0f} pm/V e "
+          f"1 laser de {pv['laser_mw']:.0f} mW para cada {pv['lambdas_por_laser']} canais.", "",
           "Varredura da configuração ajustada (margem em PAM3, dB):", "",
           "| Raio | " + " | ".join(f"{n} λ" for n in sorted({x['canais_por_fibra'] for x in R['varredura']})) + " |",
           "|---|" + "---|" * len({x['canais_por_fibra'] for x in R['varredura']})]

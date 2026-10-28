@@ -67,13 +67,16 @@ sondagem.
 
 ## Correções que a pesquisa trouxe para o modelo
 
+As tabelas acima avaliam as premissas como estavam. Todas as correções abaixo já
+foram aplicadas ao modelo (2026-10-28); o efeito é o medido depois de rodar de novo.
+
 | Premissa no modelo | Valor real | Efeito |
 |---|---|---|
-| LCP aguenta 200 °C | ~125 °C | limite corrigido em `modulos/componentes/limites.py`; a base fica em ~58 °C, então nada reprova |
-| anel com 40 pm/V | ~25 pm/V típico | margem em PAM3 cai de +2,9 dB para **+0,8 dB**; com 1 laser para cada 2 canais volta a +3,8 dB, com o dobro de potência de laser |
-| 1,5 pJ/bit por lado | ~2,5 pJ/bit (5 pJ/bit no enlace) | tradutores ~1,7× mais caros: de ~51 W para ~85 W |
-| canais a ~140 GHz | 200–400 GHz demonstrados | 16 λ a 200 GHz não cabem num FSR de 13 nm: exigiria anel menor (FSR maior) |
-| CPU lê a VRAM em ~800 ns | ~1.200 ns (uma fonte, método não informado) | a memória compartilhada fica ainda mais lenta |
+| LCP aguenta 200 °C | ~125 °C | limite corrigido em `modulos/componentes/limites.py`; a base fica em ~67 °C, então nada reprova |
+| anel com 40 pm/V | ~25 pm/V típico | junto com o anel menor abaixo, a margem em PAM3 cai de +2,9 dB para **+1,3 dB**; ainda fecha. Com 1 laser para cada 2 canais iria a +4,3 dB, com o dobro de potência de laser |
+| 1,5 pJ/bit por lado | ~2,5 pJ/bit (5 pJ/bit no enlace) | tradutores de ~51 W para ~81 W. A base dissipa ~118 W e, com a placa fria, fica em ~67 °C. Consumo de ~97 W para ~130 W: 8,8 pJ/bit, acima dos ~6,3 de uma ligação elétrica |
+| canais a ~140 GHz | 200–400 GHz demonstrados | 16 λ a 200 GHz não cabem num FSR de 13 nm. A configuração `viavel` passa a anel de raio 3,5 µm: FSR de 18,6 nm e 16 λ a ~203 GHz |
+| CPU lê a VRAM em ~800 ns | ~1.200 ns (uma fonte, método não informado) | ReBAR a ~1.200 ns, contra ~90 ns da DDR5 local |
 
 ## O que destravaria cada bloqueio
 

@@ -18,7 +18,7 @@ MPS_B = 256                    # carga máxima de um TLP
 CABECALHO_TLP_B = 16           # 4 DW, endereço de 64 bits
 ENQUADRAMENTO_B = 8            # token STP + LCRC
 FRACAO_DLLP = 0.04             # ACK e atualização de crédito
-LEITURA_PCIE_NS = 800.0        # leitura não postada: complexo raiz, endpoint e a GDDR7 do outro lado
+LEITURA_PCIE_NS = 1200.0       # leitura não postada: complexo raiz, endpoint e a GDDR7 (docs/viabilidade.md)
 
 # DDR5 local: 2 canais de 64 bits
 DDR5_MT_S = 4800

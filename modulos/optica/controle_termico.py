@@ -99,6 +99,8 @@ def simular(cfg, perturbacao_K, duracao_us, dt_us=0.1, controle=True, semente=0,
             cruzou = (medido <= alvo) if inclinacao < 0 else (minimo < alvo - 0.05 and medido >= alvo)
             if cruzou:
                 estado, integ, travou_em = "travado", ph, t
+            elif ph >= pmax:                       # varreu a faixa toda sem achar: recomeça
+                ph, minimo = 0.0, 1.0
         elif estado == "travado":
             e_nm = (medido - alvo) / inclinacao
             integ = min(max(integ - ki * e_nm / eff * dt_us, 0.0), pmax)

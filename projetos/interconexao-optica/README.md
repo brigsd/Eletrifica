@@ -25,10 +25,11 @@ Os achados principais:
 
 1. **Mapeamento funciona.** As 18 peças são identificadas só por sondagem fraca,
    em qualquer posição e rotação, com erro de micrômetros.
-2. **64 comprimentos de onda por fibra não fecham** com anéis de 10 µm: os canais
-   ficam mais próximos que a largura do filtro e a diafonia trava a taxa de
-   erros, com qualquer potência. A configuração **viável** é 16 λ por fibra e um
-   laser para cada 4 canais.
+2. **64 comprimentos de onda por fibra não fecham** com anéis de raio 5 µm: os
+   canais ficam mais próximos que a largura do filtro e a diafonia trava a taxa
+   de erros, com qualquer potência. A configuração **viável** é 16 λ por fibra a
+   ~200 GHz (anel de raio 3,5 µm para caberem no FSR) e um laser para cada 4
+   canais: ~+1,3 dB em PAM3, com anel de 25 pm/V.
 3. **Controle térmico por anel é obrigatório**: sem ele o enlace aguenta menos de
    1 °C de variação.
 4. **Contatos de energia**: a 200 A, com plano de 1 oz, pinos de núcleo da CPU
@@ -42,14 +43,16 @@ Os achados principais:
 7. **Contato imperfeito é detectado.** Canto levantado de 0,2° já degrada a CPU;
    0,5° a recusa. Sujeira condutiva e pino torto viram ponte e a peça não liga.
    Tabela em [`docs/defeitos.md`](docs/defeitos.md).
-8. **Folga dos números escolhidos:** nenhum abaixo de 20 %; os mais justos são
-   vias por chip (25 %) e perda da trilha (29 %). Ver
+8. **Folga dos números escolhidos:** com o anel realista (25 pm/V), a margem
+   óptica fica justa: o Q do anel tem 13 % de folga e as perdas passivas, 17 %.
+   Dos números elétricos, os mais justos são vias por chip (25 %) e perda da trilha
+   (29 %). Ver
    [`docs/sensibilidade.md`](docs/sensibilidade.md).
 
 9. **Chipset de verdade.** Um Intel B760 entra como peça: gera os relógios,
    sequencia a energia e carrega o ME e a BIOS da flash. O FPGA só orquestra a base.
 10. **Memória compartilhada via CXL não fecha:** nem a i5-13600KF nem a GPU
-    suportam CXL. Pelo PCIe com ReBAR, a CPU lê a GDDR7 a ~55 GB/s e ~800 ns,
+    suportam CXL. Pelo PCIe com ReBAR, a CPU lê a GDDR7 a ~55 GB/s e ~1.200 ns,
     contra ~65 GB/s e ~90 ns da DDR5 local.
 
 ## Funciona na prática?
@@ -69,8 +72,8 @@ Ficam em `montagem.json`, chave `projeto`:
 | `tradutores: sob_peca` | Ao lado da peça, trilhas de até 120 mm estouram atraso e desalinhamento da GDDR7. Numa camada de fotônica sob a peça, o pino desce poucos mm. |
 | `chave_celula: rele_mems` | A mesma chave não serve para 1 A de energia e para 32 Gb/s: transistor com R_on baixo tem dezenas de pF desligado. Relé aberto é vão de ar (~20 fF); só comuta sem corrente, e as células são configuradas antes de energizar. |
 | `cobre_plano_oz: 2` | Com 1 oz, pinos de VCCIN perto do VRM passam de 1 A. |
-| `placa_fria_h_w_m2k: 1000` | A interconexão dissipa ~88 W dentro da base; só com ar ela chega a ~200 °C e peças, relés e anéis passam do limite. Com placa fria de líquido sob a base, ~57 °C. |
-| `vias_termicas_fracao: 0.05` | O LCP conduz mal: sem cobre atravessando a base, a placa fria rende ~230 W/m²K e a base passa de 95 °C. Com vias térmicas em 5 % da área, ~950 W/m²K e ~58 °C. |
+| `placa_fria_h_w_m2k: 1000` | A interconexão dissipa ~118 W dentro da base; só com ar ela chega a ~255 °C e peças, relés e anéis passam do limite. Com placa fria de líquido sob a base, ~67 °C. |
+| `vias_termicas_fracao: 0.05` | O LCP conduz mal: sem cobre atravessando a base, a placa fria rende ~230 W/m²K e a base passa de 95 °C. Com vias térmicas em 5 % da área, ~950 W/m²K e ~67 °C. |
 
 ## Fontes do projeto
 

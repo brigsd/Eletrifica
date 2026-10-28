@@ -68,7 +68,9 @@ def test_controle_termico_segura_e_sem_controle_perde():
 
 
 def test_degrau_abrupto_retrava():
-    degrau = lambda t: 10.0 if t >= 400 else 0.0
-    r = T.simular(boa(), degrau, 1500, controle=True, simbolo="NRZ")
+    # +20 K passa da folga do aquecedor (ele só esquenta): perde o travamento
+    # e retrava quando a temperatura volta para +5 K
+    degrau = lambda t: 20.0 if 400 <= t < 900 else (5.0 if t >= 900 else 0.0)
+    r = T.simular(boa(), degrau, 3000, controle=True, simbolo="NRZ")
     assert r["perdas_de_travamento"] >= 1
     assert abs(r["erro_pm"][-1]) < 20
