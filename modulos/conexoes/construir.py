@@ -468,8 +468,13 @@ class _Construtor:
             alvos = [c for _, c, _ in caixas_peca]
             if self.posicionamento == "sob_peca":
                 # camada de fotônica dentro da base: uma grade de vagas debaixo da peça,
-                # cada grupo de pinos na vaga mais próxima (atribuição ótima)
-                vagas = self._vagas_sob(pc)
+                # cada grupo de pinos na vaga mais próxima (atribuição ótima); se não couber,
+                # a grade cresce para fora da peça, meia vaga de cada vez
+                sobra = 2.0
+                vagas = self._vagas_sob(pc, sobra)
+                while len(vagas) < len(caixas_peca) and sobra < 4 * CHIP_MM[0]:
+                    sobra += (CHIP_MM[0] + 1.2) / 2
+                    vagas = self._vagas_sob(pc, sobra)
                 if len(vagas) >= len(caixas_peca):
                     custo = np.array([[math.dist(a, s) for s in vagas] for a in alvos])
                     lin, col = linear_sum_assignment(custo)
