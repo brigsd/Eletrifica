@@ -15,7 +15,7 @@ trocar um pelo outro e **comparar os dois** (validação cruzada).
   ferramenta, tempo de execução) e escolha do motor por área em `montagem.json`.
   Pronto: o modelo Python atual registrado como motor padrão de cada área, sem
   mudar nenhum resultado.
-- [ ] **1. RTL — Verilator + cocotb + Yosys** (`modulos/rtl/`, em andamento por
+- [x] **1. RTL — Verilator + cocotb + Yosys** (`modulos/rtl/`, em andamento por
   subagente). Seletor de rank, mux de posse, emulador de manutenção (refresh e
   treino da GPU). Pronto: testes ciclo a ciclo passando, latências medidas
   substituindo as declaradas, verificador com 0 erros.
@@ -67,3 +67,4 @@ se a ferramenta faltar), job na CI quando couber, relatório gerado por script.
 - 2026-10-30 — Plano aberto. Etapa 1 já iniciada antes do plano.
 - 2026-10-30 — Etapas 8 e 9 acrescentadas: PC do dono (hardware real) como poder de cálculo e como bancada no circuito.
 - 2026-10-30 — Revisão da arquitetura registrada; etapa 10 aberta (modelar a versão revisada ao lado da atual).
+- 2026-10-30 — Etapa 1 concluída (commits 4077d41, cbaf9d3, f3bee15): emulador de manutenção provado ciclo a ciclo; latências medidas no Yosys (seletor 375 ps, detector 275 ps, ponte CL54). Ficou de fora: LFSR, WCK2CK e treino de VREF/CA; RTL das filas e PHY da ponte.
