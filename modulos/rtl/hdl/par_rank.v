@@ -23,8 +23,8 @@ module par_rank #(parameter W = 32, parameter BL = 2, parameter TRFC = 747) (
     output wire [1:0]    dono,
     output wire          pronto,
     output wire [1:0]    ocupado,
-    output wire [7:0]    ref_devido0,
-    output wire [7:0]    ref_devido1,
+    output wire [3:0]    ref_devido0,
+    output wire [3:0]    ref_devido1,
     output wire [1:0]    mrs_pendente,
     output wire [7:0]    violacoes,
     // chips

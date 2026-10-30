@@ -1,6 +1,6 @@
 // Emulador de manutenção: enquanto um rank é da ponte, o chip dele não ouve a GPU. Mas a
 // GPU continua achando que o chip é dela e manda refresh, MRS e treino periódico. A base:
-//  - absorve o REF e conta quantos o chip ficou devendo (a ponte faz esses refreshes
+//  - absorve o REF e conta quantos o chip ficou devendo (até 15; o padrão deixa adiar 8) (a ponte faz esses refreshes
 //    no chip e avisa por `ponte_ref`);
 //  - guarda o MRS numa sombra (16 registradores) e levanta `mrs_pendente`, para a ponte
 //    reaplicar ao devolver o rank;
@@ -21,8 +21,8 @@ module emulador_manutencao #(parameter W = 32, parameter BL = 2) (
     input  wire [W-1:0]  dq_gpu_in,      // escrita da GPU (WRTR)
     input  wire [1:0]    ponte_ref,      // a ponte deu um REF no chip r
     input  wire [1:0]    mrs_restaurado,
-    output reg  [7:0]    ref_devido0,
-    output reg  [7:0]    ref_devido1,
+    output reg  [3:0]    ref_devido0,
+    output reg  [3:0]    ref_devido1,
     output reg  [1:0]    mrs_pendente,
     output reg  [7:0]    violacoes,
     output reg  [W-1:0]  emu_dq,
@@ -32,16 +32,21 @@ module emulador_manutencao #(parameter W = 32, parameter BL = 2) (
     localparam integer RL_GPU = RL_CHIP + RL_EXTRA;
     localparam integer PR = RL_GPU + BL;
     localparam integer PW = WL_CHIP + BL;
+    localparam integer BI = (BL > 1) ? $clog2(BL) : 1;
 
     // ---- refresh
     wire ref_gpu = primeiro && cod == CMD_REF;
+    wire inc0 = ref_gpu && dono[0] && ref_devido0 != 4'hF, dec0 = ponte_ref[0] && ref_devido0 != 4'd0;
+    wire inc1 = ref_gpu && dono[1] && ref_devido1 != 4'hF, dec1 = ponte_ref[1] && ref_devido1 != 4'd0;
     always @(posedge clk) begin
         if (rst) begin
-            ref_devido0 <= 8'd0;
-            ref_devido1 <= 8'd0;
+            ref_devido0 <= 4'd0;
+            ref_devido1 <= 4'd0;
         end else begin
-            ref_devido0 <= ref_devido0 + {7'd0, ref_gpu && dono[0]} - {7'd0, ponte_ref[0] && ref_devido0 != 0};
-            ref_devido1 <= ref_devido1 + {7'd0, ref_gpu && dono[1]} - {7'd0, ponte_ref[1] && ref_devido1 != 0};
+            if (inc0 && !dec0) ref_devido0 <= ref_devido0 + 4'd1;
+            if (dec0 && !inc0) ref_devido0 <= ref_devido0 - 4'd1;
+            if (inc1 && !dec1) ref_devido1 <= ref_devido1 + 4'd1;
+            if (dec1 && !inc1) ref_devido1 <= ref_devido1 - 4'd1;
         end
     end
 
@@ -80,13 +85,13 @@ module emulador_manutencao #(parameter W = 32, parameter BL = 2) (
     wire rdtr = primeiro && cod == CMD_RDTR;
     integer j;
     reg cap, cap_ult, resp, resp_ult, resp_emu;
-    reg [31:0] cap_beat, resp_beat;
+    reg [BI-1:0] cap_beat, resp_beat;
     always @(*) begin
         cap = 1'b0; cap_ult = 1'b0; cap_beat = 0;
         resp = 1'b0; resp_ult = 1'b0; resp_beat = 0; resp_emu = 1'b0;
         for (j = 0; j < BL; j = j + 1) begin
-            if (wpipe[WL_CHIP-1+j]) begin cap = 1'b1; cap_beat = j; cap_ult = (j == BL-1); end
-            if (rpipe[RL_GPU-2+j])  begin resp = 1'b1; resp_beat = j; resp_ult = (j == BL-1); resp_emu = epipe[RL_GPU-2+j]; end
+            if (wpipe[WL_CHIP-1+j]) begin cap = 1'b1; cap_beat = j[BI-1:0]; cap_ult = (j == BL-1); end
+            if (rpipe[RL_GPU-2+j])  begin resp = 1'b1; resp_beat = j[BI-1:0]; resp_ult = (j == BL-1); resp_emu = epipe[RL_GPU-2+j]; end
         end
     end
     always @(posedge clk) begin

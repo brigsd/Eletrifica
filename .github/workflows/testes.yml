@@ -37,3 +37,20 @@ jobs:
       - name: Testes
         # o teste do esquemático é pulado: não há kicad-cli aqui
         run: python -m pytest -q ${{ matrix.grupo.arquivos }}
+
+  rtl:
+    # RTL do banco unificado: testes cocotb no Verilator e síntese no Yosys (tests/test_rtl.py)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Sistema
+        run: sudo apt-get update && sudo apt-get install -y libcairo2 verilator yosys
+      - name: Dependências
+        run: python -m pip install -r requirements.txt
+      - name: Testes
+        run: python -m pytest -q tests/test_rtl.py

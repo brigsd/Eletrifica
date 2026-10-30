@@ -43,27 +43,44 @@ module mux_posse #(parameter W = 32, parameter BL = 2, parameter TRFC = 747, par
         decod_ca dec (.clk(clk), .rst(rst), .ca(ca), .primeiro(prim), .cod(cod), .banco(banco),
                       .linha_alta(la));
         reg [31:0] abertos;
-        reg [9:0]  voo;
+        reg [4:0]  voo_alto, voo_baixo;
+        reg        sem_voo, sem_abertos;     // registrados: tiram a comparação do caminho da troca
+        wire carrega = prim && (cod == CMD_RD || cod == CMD_RDTR || cod == CMD_WR || cod == CMD_WRTR
+                                || cod == CMD_REF || cod == CMD_MRS);
+        wire [31:0] abertos_prox = (prim && cod == CMD_ACT) ? (abertos | (32'd1 << banco)) :
+                                   (prim && cod == CMD_PRE) ? (abertos & ~(32'd1 << banco)) : abertos;
         always @(posedge clk) begin
             if (rst) begin
                 abertos <= 32'd0;
-                voo <= 10'd0;
+                voo_alto <= 5'd0;
+                voo_baixo <= 5'd0;
+                sem_voo <= 1'b1;
+                sem_abertos <= 1'b1;
             end else begin
-                if (prim && cod == CMD_ACT) abertos[banco] <= 1'b1;
-                if (prim && cod == CMD_PRE) abertos[banco] <= 1'b0;
+                abertos <= abertos_prox;
+                // = (abertos_prox == 0), sem passar pelo mux do ACT
+                sem_abertos <= !(prim && cod == CMD_ACT) &&
+                               (abertos & ~((prim && cod == CMD_PRE) ? (32'd1 << banco) : 32'd0)) == 32'd0;
+                sem_voo <= !carrega && voo_alto == 5'd0 && voo_baixo <= 5'd1;
+                // contador em duas metades de 5 bits: o empréstimo da de baixo para a de
+                // cima vem de um registro, e o caminho fica no tamanho de um contador de 5 bits
                 if (prim && (cod == CMD_RD || cod == CMD_RDTR))
-                    voo <= RL_CHIP + BL;
+                    {voo_alto, voo_baixo} <= RL_CHIP + BL;
                 else if (prim && (cod == CMD_WR || cod == CMD_WRTR))
-                    voo <= WL_CHIP + BL;
+                    {voo_alto, voo_baixo} <= WL_CHIP + BL;
                 else if (prim && cod == CMD_REF)
-                    voo <= TRFC;
+                    {voo_alto, voo_baixo} <= TRFC;
                 else if (prim && cod == CMD_MRS)
-                    voo <= TMRD;
-                else if (voo != 10'd0)
-                    voo <= voo - 10'd1;
+                    {voo_alto, voo_baixo} <= TMRD;
+                else if (voo_baixo != 5'd0)
+                    voo_baixo <= voo_baixo - 5'd1;
+                else if (voo_alto != 5'd0) begin
+                    voo_alto <= voo_alto - 5'd1;
+                    voo_baixo <= 5'd31;
+                end
             end
         end
-        assign livre[r] = prim && cod == CMD_NOP && abertos == 32'd0 && voo == 10'd0;
+        assign livre[r] = prim && cod == CMD_NOP && sem_abertos && sem_voo;
     end endgenerate
     assign ocupado = ~livre;
 
