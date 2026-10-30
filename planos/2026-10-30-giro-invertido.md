@@ -98,6 +98,16 @@ tests/test_llm.py      pulado com aviso se faltar torch, modelo ou GPU
   baixos na RAM; núcleo de GPU próprio que junta as duas partes na hora; o chute
   usa só os altos. Pronto: tokens/s medido contra a etapa 4, com texto idêntico.
 
+- [ ] **6. Cache de contexto escolhida pelo chute (futura).** A atenção do modelo
+  pequeno, que já roda no giro, prevê quais tokens da cache (KV) o grande vai
+  olhar; só esses ficam na VRAM em precisão alta. Pronto: texto contra a cache
+  inteira em q8_0 e VRAM liberada para pesos, medidos em contexto longo.
+- [ ] **7. Cache em q2 com reparo (futura).** Cache inteira em q2 na VRAM, cópia
+  exata na RAM (SSD só se não couber). A cada token, a atenção sobre o q2 aponta
+  os ~500 tokens mais importantes, e só esses voltam exatos pelo PCIe (~130 MB,
+  ~3 ms no 32B). Referências: InfiniGen, ShadowKV. Pronto: qualidade em contexto
+  longo igual à do q8_0, com tokens/s e VRAM medidos.
+
 Cada etapa: teste no pytest, relatório gerado por script, `CLAUDE.md` atualizado.
 
 ## Números de partida (estimativa, 2026-10-30)
@@ -137,3 +147,4 @@ PC do dono: i5-13600KF, 32 GB DDR5 (~80 GB/s), RTX 5070 com 12 GB GDDR7
 - 2026-10-30 — Plano aberto, depois do encerramento do plano dos motores. Origem:
   a conversa sobre o gargalo do LLM (giro dos pesos, sentido inverso, modelos
   inteiros).
+- 2026-10-30 — Etapas 6 e 7 (cache de contexto) acrescentadas a pedido do dono.
