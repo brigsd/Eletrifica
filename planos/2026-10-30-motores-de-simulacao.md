@@ -9,6 +9,29 @@ Tirar o simulador do "muito simulado": cada área pode ser calculada por um
 motor é um módulo com a mesma entrada e saída do modelo que substitui, para
 trocar um pelo outro e **comparar os dois** (validação cruzada).
 
+## Organização
+
+```
+modulos/motores/
+  README.md      contrato: entrada, saída, como adicionar um motor
+  base.py        interface comum + cache de resultados por hash da entrada
+  <ferramenta>/  motor.py (adaptador), Dockerfile (versão fixada), README.md
+projetos/interconexao-optica/motores/<ferramenta>/<hash>.json   resultados publicados
+```
+
+- Cada ferramenta roda num contêiner Docker com versão fixada (igual em qualquer
+  máquina).
+- `python3 -m modulos.motores.rodar <motor>` grava um JSON pequeno: resultado,
+  versão da ferramenta, máquina, commit e hash da entrada. `publicar` faz commit
+  e push só desses JSON; saída bruta não vai para o repositório.
+- Na VM e na CI o simulador usa o resultado publicado se o hash bater; se o
+  projeto mudou, avisa que está velho e volta ao modelo Python.
+
+## Ordem
+
+0 → 2 (memória) → 3 (ngspice) → 10 (arquitetura revisada) → 4, 5, 6 → 8 e 9 →
+7 por último (muito trabalho, não muda decisão de projeto).
+
 ## Etapas
 
 - [ ] **0. Contrato de motor.** Interface comum (entrada, saída, versão da
@@ -82,3 +105,4 @@ se a ferramenta faltar), job na CI quando couber, relatório gerado por script.
 - 2026-10-30 — Revisão da arquitetura registrada; etapa 10 aberta (modelar a versão revisada ao lado da atual).
 - 2026-10-30 — Etapa 1 concluída (commits 4077d41, cbaf9d3, f3bee15): emulador de manutenção provado ciclo a ciclo; latências medidas no Yosys (seletor 375 ps, detector 275 ps, ponte CL54). Ficou de fora: LFSR, WCK2CK e treino de VREF/CA; RTL das filas e PHY da ponte.
 - 2026-10-30 — Etapa 10 detalhada com as 6 melhorias; ferramentas pesadas (4, 5, 6, 7) dependem da etapa 8 para o cálculo completo.
+- 2026-10-30 — Organização dos motores (Docker, resultados publicados por hash) e ordem definidas com o dono.
