@@ -33,6 +33,22 @@ sozinhos chutarem mal (truncar um 4 bits comum dá um 2 bits ruim; um formato em
 resíduo, 2 + 2, otimizado para o 1º estágio funcionar sozinho, pode resolver).
 Num 32B, a parte alta em 2 bits ocupa ~8 GB e cabe nos 12 GB.
 
+## Ligação com a cache de contexto
+
+Ideias do estudo `2026-10-30-cache-de-contexto.md`, aplicadas aqui:
+
+- **Cache menor, menos giro.** Tudo o que a cache libera na VRAM vira peso que
+  não precisa girar. No 32B a 32 mil tokens, de f16 para q8_0 são ~4 GB a menos
+  no giro (~11 → ~7 GB por passada).
+- **O chute escolhe a cache.** O modelo pequeno já roda a cada giro; a atenção
+  dele pode prever quais tokens da cache o grande vai olhar. Só esses ficam em
+  precisão alta, sem custo de um modelo extra.
+- **Q2 com reparo dentro do giro.** O reparo (trazer da RAM os ~500 tokens
+  exatos) pode viajar junto com as camadas, enquanto a GPU calcula; os ~3 ms
+  somem dentro do tempo do giro.
+- **Cuidado:** a árvore de ~200 chutes também cria cache; ela é temporária e
+  fica fora da cache quantizada.
+
 ## Números (estimativa, 32B em 4 bits no PC do dono)
 
 | | tokens/s |
