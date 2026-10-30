@@ -19,6 +19,7 @@ from modulos.conexoes.padroes import PADROES, padrao_do_pino
 from modulos.conexoes.posicao import Ocupacao, manhattan
 from modulos.conexoes.verificador import REGIOES_FIRMWARE, atraso_caminho_ps
 from modulos.dados import comandos as CMD
+from modulos.rtl import medidas as RTL
 from modulos.dados import ddr5 as DDR5
 from modulos.dados import memoria_unificada as MU
 from modulos.dados.protocolos import PROTOCOLOS
@@ -85,7 +86,8 @@ OPCIONAL_MEMORIA = "memoria-compartilhada"
 # banco unificado (modulos.dados.memoria_unificada): seletor de rank, posse e ponte
 MUX_DONO_PS = 20.0             # chave estática: só vira na troca de dono
 POTENCIA_COMUTADOR_W = 0.002
-LATENCIA_RANK_PS = 200.0       # comando e banco do primeiro ciclo até o chip escolhido
+RL_GDDR7_TCK = round(CMD.LATENCIAS["GDDR7-32"]["CL_ns"] / CMD.TCK_GDDR7_NS)
+LATENCIA_RANK_PS = RTL.DETECTOR_RANK_PS   # medido no RTL (detector_rank.v); era 200 declarado
 
 # constantes que construir(..., parametros={...}) pode sobrepor numa chamada
 PARAMETROS = ("VIAS_MAX", "CHIP_MM", "AFASTAMENTO_CHIP_MM", "VDD_CHIP_V", "PJ_BIT_TX", "PJ_BIT_RX",
@@ -946,6 +948,7 @@ class _Construtor:
             chip = nl.blocos[sels[0]].pai
             det = f"{chip}:rank"
             nl.bloco(det, "detector_rank", nl.blocos[chip].posicao, pai=chip, grupo=lider,
+                     rtl="modulos/rtl/hdl/detector_rank.v",
                      ranks=self.ranks, decodifica=["ACT:linha_alta", "banco"],
                      latencia_ps=LATENCIA_RANK_PS, seletores=len(sels))
             nl.porta(det, "rank", "controle", "sai")
@@ -957,6 +960,19 @@ class _Construtor:
                 nl.ligar(ponto, (det, f"ca{k}"), "interno" if nl.blocos[ponto[0]].pai == chip else "trilha")
             for sel in sels:
                 nl.ligar((det, "rank"), (sel, "sel"), "interno" if nl.blocos[sel].pai == chip else "trilha")
+            # enquanto um rank é da ponte, a base absorve o REF/MRS e responde o treino da GPU;
+            # provado no RTL (modulos/rtl/hdl/emulador_manutencao.v, testes cocotb)
+            emu = f"{chip}:manutencao"
+            nl.bloco(emu, "emulador_manutencao", nl.blocos[chip].posicao, pai=chip, grupo=lider,
+                     rtl="modulos/rtl/hdl/emulador_manutencao.v", absorve=["REF", "MRS"],
+                     responde=["WRTR", "RDTR"], caminho_ps=RTL.EMULADOR_PS,
+                     resposta_tck=RL_GDDR7_TCK + MU.RL_EXTRA_TCK, rl_declarado_tck=RL_GDDR7_TCK + MU.RL_EXTRA_TCK)
+            nl.porta(emu, "cmd", "controle", "entra")
+            nl.porta(emu, "posse", "controle", "entra")         # o dono de cada rank, do FPGA
+            nl.ligar((chip, "ctl"), (emu, "posse"), "interno")
+            nl.porta(emu, "vdd", "energia", "entra", tensao_v=VDD_CHIP_V)
+            nl.ligar((chip, "vdd"), (emu, "vdd"), "interno")
+            nl.ligar((det, "rank"), (emu, "cmd"), "interno")
 
     def _detectores(self):
         nl = self.nl

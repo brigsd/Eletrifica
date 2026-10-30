@@ -101,7 +101,7 @@ Canais simulados no tempo (configuração viável):
 
 ## Conexões — a netlist do sistema inteiro
 
-Cada sinal é seguido salto a salto: pino → célula → trilha na base → chip tradutor → modulador → fibra → filtro → receptor → driver de saída → trilha → célula → pino, com laser, alimentação, controle e relógio de cada bloco ativo. São 15669 blocos, 34726 ligações e 2225 sinais. O verificador (`modulos/conexoes/verificador.py`) confere 20 regras.
+Cada sinal é seguido salto a salto: pino → célula → trilha na base → chip tradutor → modulador → fibra → filtro → receptor → driver de saída → trilha → célula → pino, com laser, alimentação, controle e relógio de cada bloco ativo. São 15681 blocos, 34762 ligações e 2225 sinais. O verificador (`modulos/conexoes/verificador.py`) confere 20 regras.
 
 Erros por regra, do conceito até o projeto atual:
 
@@ -109,13 +109,15 @@ Erros por regra, do conceito até o projeto atual:
 |---|---|---|---|---|---|---|
 | banda | 9058 | 7702 | 0 | 0 | 0 | 0 |
 | energia | 1 | 1 | 1 | 0 | 0 | 0 |
+| tempo | 106 | 0 | 0 | 0 | 0 | 0 |
 | temperatura | 149 | 163 | 166 | 164 | 62 | 0 |
-| **total** | **9208** | **7866** | **167** | **164** | **62** | **0** |
+| **total** | **9314** | **7866** | **167** | **164** | **62** | **0** |
 
 O que cada decisão resolveu:
 
 - **banda** (conceito): cel:CPU:DDR5_A_A_DQ0: banda 0,1 GHz < 2,4 GHz de DDR5-DQ
 - **energia** (conceito): CPU:VCCIN: 21 pinos acima de 1 A (máx. 1,21 A)
+- **tempo** (conceito): GPU.G1_CA0->MEM20.GX_CA0 (ida): 1785 ps > 1750 ps
 - **temperatura** (conceito): peça MEM2 (GDDR7): 159,9 °C > 105 °C
 
 - **Tradutor sob a peça:** com o chip ao lado, trilhas de até 120 mm na base estouram o atraso e o desalinhamento da GDDR7; numa camada de fotônica debaixo da peça, cada pino desce poucos milímetros até o seu chip.
@@ -163,14 +165,14 @@ Nem a i5-13600KF nem a GPU têm CXL. Com o banco unificado da base (seção segu
 | GPU vista pela CPU (ReBAR, PCIe 5 x16) | 55 GB/s | 1201 ns | não |
 | DDR5 local (1 canal DDR5-4800) | 33 GB/s | 93 ns | sim |
 | Unificada no encapsulamento (LPDDR5X-8533, 128 bits) (não dá nesta montagem) | 116 GB/s | 110 ns | sim |
-| Banco unificado pela ponte (48 GB, os chips da GPU) | 33 GB/s | 96 ns | por posse |
+| Banco unificado pela ponte (48 GB, os chips da GPU) | 33 GB/s | 97 ns | por posse |
 
 ## Banco unificado — CPU e GPU na mesma memória
 
 A GPU só tem uma porta rápida, a de memória; o PCIe até a CPU é o barramento lento do offloading. Então o banco compartilhado entra pela porta de memória da GPU. A base está no meio de cada pino e faz o que uma placa-mãe não faz (`modulos/dados/memoria_unificada.py`):
 
 - **Mais chips por canal.** 24 chips GDDR7 de 16 Gb; a GPU enxerga 12 chips de 32 Gb (o maior do padrão), cada um feito de 2 vizinhos. O seletor do grupo escolhe o chip pelo comando, como num LRDIMM: 480 seletores, 12 detectores, e uma linha de atraso em cada porta deixa os chips do grupo chegando juntos.
-- **A CPU nos mesmos chips.** Um canal DDR5 da CPU vai para a ponte, que se apresenta como um DIMM de 48 GB e declara CL53 no SPD (o DDR5 aceita até CL66; a leitura pela ponte leva 22,0 ns, com 1,64 ns de caminho até os chips e 1,33 ns de volta).
+- **A CPU nos mesmos chips.** Um canal DDR5 da CPU vai para a ponte, que se apresenta como um DIMM de 48 GB e declara CL54 no SPD (o DDR5 aceita até CL66; a leitura pela ponte leva 22,2 ns, com 1,76 ns de caminho até os chips e 1,65 ns de volta).
 - **Um dono por rank.** 480 muxes de posse, comandados pelo FPGA; enquanto um rank é da CPU, a base absorve ~6,3 milhões de refresh por segundo que a GPU manda para ele.
 - **Mesmo endereço dos dois lados.** No boot a ponte aprende os dois mapas com 29 sondas da GPU e 28 da CPU e confere com 64 sondas aleatórias de cada lado: **0 erros**; varrer o banco leva 33,6 ms. Um mapa fora da família (rank misturado com bit baixo) é avisado.
 

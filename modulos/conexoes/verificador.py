@@ -43,7 +43,8 @@ MAX_DISPOSITIVOS_BARRAMENTO = 32
 
 # blocos que não funcionam sem alimentação, mesmo sem porta declarada
 PRECISAM_ENERGIA = {"chip_tradutor", "laser", "regulador", "controlador", "relogio",
-                    "detector_sentido", "detector_rank", "conversor_nivel"}
+                    "detector_sentido", "detector_rank", "conversor_nivel",
+                    "emulador_manutencao"}
 # portas sem as quais o bloco não faz sentido
 OBRIGATORIAS = {
     "pino": ("e",), "celula": ("pino", "base"), "trilha": ("a", "b"),
@@ -53,6 +54,7 @@ OBRIGATORIAS = {
     "acoplador": ("chip", "fibra"), "fibra": ("a", "b"), "regulador": ("vin", "vout"),
     "laser": ("vdd",),
     "seletor_rank": ("pino", "r0", "sel"), "mux_dono": ("pino", "sel"), "detector_rank": ("rank", "vdd"),
+    "emulador_manutencao": ("cmd", "posse", "vdd"),
 }
 PASSIVOS_ELETRICOS = {"celula", "trilha"}            # ligam suas portas elétricas por dentro
 PASSIVOS_OPTICOS = {"fibra", "divisor", "acoplador", "chip_tradutor"}
@@ -592,6 +594,8 @@ def _r07(net, rel):
                 continue
             if b.tipo in ("chave_sentido", "detector_sentido", "seletor_rank"):
                 continue          # sentido e rank vêm dos detectores, verificados em R02 e R20
+            if b.tipo == "emulador_manutencao" and n == "cmd":
+                continue          # o comando vem do detector de rank (R20)
             if uf.find((b.id, n)) not in raizes_ok:
                 rel.violacoes.append(Violacao(R, "erro", b.id, f"{b.id}.{n}: não chega a nenhum controlador"))
     for cid in controladores:
@@ -1213,6 +1217,36 @@ def _r19(net, rel):
                                           f"{chip} fora do banco: só {', '.join(sorted(cs))} chega a ele"))
 
 
+def _r20_manutencao(net, rel, det):
+    """Enquanto um rank é da ponte, quem responde a GPU é a base: um emulador de manutenção no
+    tradutor do detector, que absorve REF/MRS, responde WRTR/RDTR no RL que o chip declara, tem
+    RTL que o prova e cujo caminho lógico cabe num CK da GDDR7 (medido na síntese)."""
+    R = "R20-banco"
+
+    from modulos.caminhos import RAIZ
+    from modulos.rtl import medidas as RTL
+    emus = [b for b in net.por_tipo("emulador_manutencao") if b.pai == det.pai
+            and b.atributos.get("grupo") == det.atributos.get("grupo")]
+    if not emus:
+        rel.violacoes.append(Violacao(R, "erro", det.id, f"{det.id}: nenhum emulador de manutenção: "
+                                      f"com o rank na ponte, ninguém absorve o REF nem responde o treino"))
+        return
+    a = emus[0].atributos
+    falta = ({"REF"} - set(a.get("absorve", ()))) | ({"WRTR", "RDTR"} - set(a.get("responde", ())))
+    if falta:
+        rel.violacoes.append(Violacao(R, "erro", emus[0].id, f"{emus[0].id}: não trata {sorted(falta)}"))
+    if not a.get("rtl") or not (RAIZ / a["rtl"]).exists():
+        rel.violacoes.append(Violacao(R, "erro", emus[0].id, f"{emus[0].id}: sem RTL que prove a resposta"))
+    if a.get("caminho_ps", 0.0) + RTL.REGISTRO_PS > RTL.TCK_GDDR7_PS:
+        rel.violacoes.append(Violacao(R, "erro", emus[0].id,
+                                      f"{emus[0].id}: caminho de {a['caminho_ps']:.0f} ps não fecha num CK "
+                                      f"de {RTL.TCK_GDDR7_PS:.0f} ps"))
+    if a.get("resposta_tck") != a.get("rl_declarado_tck"):
+        rel.violacoes.append(Violacao(R, "erro", emus[0].id,
+                                      f"{emus[0].id}: responde em {a.get('resposta_tck')} CK e o chip "
+                                      f"declara RL de {a.get('rl_declarado_tck')}"))
+
+
 def _r20(net, rel):
     """Banco unificado: o que a GPU endereça, o CL que a ponte declara, o seletor e o alinhamento."""
     R = "R20-banco"
@@ -1271,6 +1305,8 @@ def _r20(net, rel):
                 rel.violacoes.append(Violacao(R, "erro", sel.id,
                                               f"{sel.id}: o comando sai em {a['atraso_ps']:.0f} ps e o chip só é "
                                               f"escolhido em {det.atributos['latencia_ps']:.0f} ps"))
+        if det is not None:
+            _r20_manutencao(net, rel, det)
         if a.get("faixa_usada_ps", 0.0) > a.get("faixa_alinhamento_ps", float("inf")):
             rel.violacoes.append(Violacao(R, "erro", sel.id,
                                           f"{sel.id}: igualar os chips pede {a['faixa_usada_ps']:.0f} ps de "

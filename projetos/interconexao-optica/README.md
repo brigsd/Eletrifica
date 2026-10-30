@@ -60,6 +60,17 @@ Os achados principais:
     4 bits cabe inteiro e roda a até ~38 tokens/s, contra ~4,5 do offload de um PC
     comum. Detalhes na seção do banco em [`docs/resultados.md`](docs/resultados.md).
 
+## O banco em hardware (RTL)
+
+Os blocos do banco que ficam no tradutor e na ponte estão em Verilog sintetizável
+(`modulos/rtl/hdl/`), testados ciclo a ciclo no Verilator com cocotb e sintetizados
+no Yosys. [`docs/rtl.md`](docs/rtl.md), gerado por `python3 -m modulos.rtl.relatorio`,
+traz os testes, a área, a profundidade lógica e o declarado contra o medido. O ponto
+que era só declarado, a base absorver o refresh e responder o treino da GPU enquanto
+o rank está com a CPU, agora tem RTL que o prova (`emulador_manutencao.v`), e a
+netlist aponta para ele (R20). As latências do seletor, do detector e da ponte vêm
+do RTL (`modulos/rtl/medidas.py`).
+
 ## Funciona na prática?
 
 O simulador prova coerência com as premissas; [`docs/viabilidade.md`](docs/viabilidade.md)
@@ -102,6 +113,7 @@ Tudo em `docs/*.svg`, `docs/resultados.md` e `web/` é gerado. Não edite à mã
 | `modulos/termico` | Temperatura da base em regime e no transiente |
 | `modulos/optica` | Anel modulador, filtros, receptor, enlace no tempo, controle térmico dos anéis |
 | `modulos/dados` | Protocolos, roteamento sinal → canal → fibra, latência, rajadas, treino de memória, banco unificado (mapas, ponte, posse, LLM) |
+| `modulos/rtl` | RTL (Verilog) do banco: detector e seletor de rank, mux de posse, emulador de manutenção, mapa da ponte; testes cocotb no Verilator e síntese no Yosys |
 | `modulos/visual` | Cena do visualizador e gráficos |
 
 As pinagens das peças são sintéticas: contagem, passo e proporção entre energia,

@@ -27,6 +27,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from modulos.dados.comandos import LATENCIAS, TCK_DDR5_NS
+from modulos.rtl import medidas as RTL
 
 # --- banco ------------------------------------------------------------------
 CANAIS_GPU = 12
@@ -57,7 +58,9 @@ CAMPOS_CPU = (("sub", 1), ("coluna", 7), ("banco", 5), ("rank", 1), ("linha", 14
 
 # --- ponte DDR5 -> GDDR7 ---------------------------------------------------------
 PONTE_PHY_DDR5_NS = 1.5        # receber o comando ou devolver o burst DDR5, cada sentido
-PONTE_LOGICA_NS = 2.0          # mapas aprendidos (árvores de XOR) e fila
+PONTE_MAPA_NS = RTL.PONTE_MAPA_NS   # medido no RTL (ponte_mapa.v): árvores de XOR e divisão por 3
+PONTE_FILA_NS = 1.0            # declarado: fila e arbitragem, fora do RTL
+PONTE_LOGICA_NS = PONTE_MAPA_NS + PONTE_FILA_NS   # era 2,0 declarado
 PONTE_PHY_GDDR7_NS = 1.0       # cada sentido
 TRCD_GDDR7_NS = 12.0
 RL_GDDR7_NS = LATENCIAS["GDDR7-32"]["CL_ns"]
@@ -66,11 +69,11 @@ CL_MAX_DDR5 = 66               # maior CL que os registradores do DDR5 aceitam (
 PORTAS_GDDR7_PONTE = CANAIS_GPU
 
 # --- seletor de rank, do lado da GPU ---------------------------------------------
-SELETOR_CA_PS = 250.0          # lê comando e banco no primeiro ciclo e põe NOP no chip não escolhido
-SELETOR_DQ_PS = 50.0           # mux de leitura entre os dois chips
+SELETOR_CA_PS = RTL.SELETOR_CA_PS   # medido no RTL: 1 registro (era 250 declarado)
+SELETOR_DQ_PS = RTL.SELETOR_DQ_PS   # medido no RTL: o mux de leitura é registrado (era 50 declarado)
 PASSO_ALINHAMENTO_PS = 1.0     # linha de atraso que iguala a chegada dos dois chips
 FAIXA_ALINHAMENTO_PS = 250.0
-RL_EXTRA_TCK = 2               # o chip emulado declara à GPU um RL maior, para cobrir o seletor
+RL_EXTRA_TCK = RTL.RL_EXTRA_TCK   # o chip emulado declara RL maior: os 2 registros do seletor (provado no cocotb)
 RL_EXTRA_PS = RL_EXTRA_TCK * LATENCIAS["GDDR7-32"]["tck_ns"] * 1000
 TOLERANCIA_DESALINHAMENTO_PS = 0.1 * 1000 / (32.0 / 1.5)   # 0,1 UI da GDDR7 em PAM3
 

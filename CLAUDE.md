@@ -61,6 +61,7 @@ modulos/      ferramentas por objetivo; cada pasta é um módulo Python
   conexoes/     netlist do sistema inteiro + verificador (18 regras) + sensibilidade
   energia/ termico/ optica/ dados/   simuladores
   visual/       cena 3D e gráficos SVG
+  rtl/          Verilog do banco unificado (hdl/), testes cocotb (cocotb/), síntese Yosys
 projetos/     um diretório por projeto (dados de origem + saídas geradas + visualizador)
   cnc-laser/    gerber/, hardware/, docs/, web/, index.html, README.md
   interconexao-optica/   montagem.json, enlace.json, docs/, web/, index.html, README.md
@@ -201,6 +202,21 @@ Regras do modelo:
   12 canais). Regras R19 (posse) e R20 (banco); etapa "Banco unificado" no boot.
 - **Contato imperfeito** (`modulos/sistema/defeitos.py`) altera a verdade antes
   da sondagem; peça recusada ou desconhecida não liga célula nenhuma.
+- **RTL do banco** (`modulos/rtl/`): `hdl/` tem detector e seletor de rank, mux de
+  posse, emulador de manutenção (absorve REF/MRS e responde WRTR/RDTR no RL da GPU
+  com o rank na ponte) e o mapa da ponte (GF(2) e divisão por 3 em prefixo
+  paralelo). `hdl/comandos.vh` é gerado de `comandos.py` (`python3 -m modulos.rtl.gerar`).
+  Testes cocotb ciclo a ciclo no CK da GDDR7: `python3 -m modulos.rtl.sim`; síntese:
+  `python3 -m modulos.rtl.sintese`; relatório `docs/rtl.md`:
+  `python3 -m modulos.rtl.relatorio` (~2 min). Ferramentas: `apt-get install verilator
+  yosys` (Verilator 5.020 do Ubuntu 24.04) e **cocotb 1.9** (o 2.x exige Verilator ≥
+  5.036). `tests/test_rtl.py` pula com mensagem se faltar alguma; a CI tem um job `rtl`.
+  As latências do seletor (`SELETOR_CA_PS`, `SELETOR_DQ_PS`, `RL_EXTRA_TCK`), do
+  detector (`LATENCIA_RANK_PS`) e do mapa da ponte vêm de `modulos/rtl/medidas.py`;
+  se mudar o RTL, rode a síntese e atualize `NIVEIS` lá (o teste lento confere).
+  A netlist põe um `emulador_manutencao` por detector, com o arquivo RTL; a R20
+  confere que ele existe, trata REF/WRTR/RDTR, responde no RL declarado e cabe num CK.
+  O ACT em `comandos.codificar(..., linha=)` leva os 3 bits altos da linha no 1º ciclo.
 - Dois relatórios à parte, mais lentos, regenerados à mão:
   `python3 -m modulos.conexoes.sensibilidade` (docs/sensibilidade.md, ~10 min: refaz a
   temperatura a cada variação) e
@@ -219,10 +235,10 @@ Resultados atuais (confira rodando, não confie nestes números):
 - O PCH é peça própria: gera os relógios, sequencia a energia, lê o ME e a BIOS
   da flash. O FPGA só orquestra a base (células, tradutores, lasers).
 - Memória compartilhada **fecha pelo banco unificado** (sem CXL nas peças):
-  48 GB que a GPU lê a 1,5 TB/s e a CPU lê como RAM (~96 ns). A emulação confere
+  48 GB que a GPU lê a 1,5 TB/s e a CPU lê como RAM (~97 ns, CL54 na ponte). A emulação confere
   bit a bit CPU → GPU e GPU → CPU. LLM de 70B em 4 bits: teto ~38 tokens/s,
   contra ~4,5 do offload de um PC comum.
-- Conceito como estava: ~8.900 erros no verificador. Com as decisões de
+- Conceito como estava: ~9.300 erros no verificador (106 de tempo vêm do seletor registrado medido no RTL). Com as decisões de
   `montagem.json` (tradutor sob a peça, relé MEMS na célula, plano de 2 oz,
   placa fria sob a base com vias térmicas em 5 % da área): 0 erros, e o boot
   emulado fica pronto em ~540 ms. Placa fria e vias térmicas: aceitas pelo dono

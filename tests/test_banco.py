@@ -102,6 +102,20 @@ def test_cl_declarado_curto_e_chip_grande_demais_sao_erro(netlist_real):
     assert any("CL" in m for m in msgs) and any("64 Gb" in m for m in msgs)
 
 
+def test_manutencao_aponta_para_o_rtl_e_sem_ela_e_erro(netlist_real):
+    """Cada detector de rank tem um emulador de manutenção com o RTL que o prova; sem ele,
+    ou com um caminho que não cabe num CK, a R20 reprova."""
+    emus = netlist_real.por_tipo("emulador_manutencao")
+    assert len(emus) == len(netlist_real.por_tipo("detector_rank")) > 0
+    assert all(e.atributos["rtl"].endswith("emulador_manutencao.v") for e in emus)
+    nl = copy.deepcopy(netlist_real)
+    nl.blocos[emus[0].id].atributos["caminho_ps"] = 400.0
+    alvo = [b for b in nl.por_tipo("emulador_manutencao")][1].id
+    nl.blocos[alvo].atributos["responde"] = ["WRTR"]
+    msgs = [v.mensagem for v in verificar(nl).erros if v.regra == "R20-banco"]
+    assert any("não fecha" in m for m in msgs) and any("RDTR" in m for m in msgs)
+
+
 @pytest.mark.lento
 def test_boot_calibra_o_banco_e_para_sem_a_ponte(netlist_real):
     ex = emular(netlist_real)
