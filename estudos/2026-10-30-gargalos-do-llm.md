@@ -3,6 +3,15 @@
 Estudo, 2026-10-30. Sem implementação. Vale para qualquer motor e qualquer
 modelo; o caso base é o Qwen3.8-Flash-Next no PC do dono.
 
+## Em poucas palavras
+
+O PC do dono aguentaria rodar o Qwen3.8-Flash-Next umas 10 vezes mais rápido do
+que o colibri roda hoje (~25 a 40 contra 1 a 4 tok/s, estimativa). Quem atrasa
+não é o hardware, é o programa: a CPU faz conta que a GPU faria, as cópias são
+lentas e tudo anda em fila, com os links parados a maior parte do tempo. Como
+uma estrada larga com o caminhão carregado à mão: alargar a estrada não ajuda;
+carregar direito, sim.
+
 ## Regra geral
 
 Cada token obriga certos bytes a atravessar certos links. Para cada link:
