@@ -106,3 +106,21 @@ se a ferramenta faltar), job na CI quando couber, relatório gerado por script.
 - 2026-10-30 — Etapa 1 concluída (commits 4077d41, cbaf9d3, f3bee15): emulador de manutenção provado ciclo a ciclo; latências medidas no Yosys (seletor 375 ps, detector 275 ps, ponte CL54). Ficou de fora: LFSR, WCK2CK e treino de VREF/CA; RTL das filas e PHY da ponte.
 - 2026-10-30 — Etapa 10 detalhada com as 6 melhorias; ferramentas pesadas (4, 5, 6, 7) dependem da etapa 8 para o cálculo completo.
 - 2026-10-30 — Organização dos motores (Docker, resultados publicados por hash) e ordem definidas com o dono.
+
+## Desfecho
+
+2026-10-30 — **Encerrado** pelo dono: custo contra ganho não compensa para
+construir em casa (exigiria silício novo: ponte, tradutores, base), e o
+problema central (memória rápida e grande para a GPU) já tem saída comercial.
+
+Feito:
+- Etapa 1 (RTL): `4077d41`, `cbaf9d3`, `f3bee15` — emulador de manutenção,
+  seletor, posse e mapa da ponte provados ciclo a ciclo; latências medidas.
+- Organização dos motores, revisão da arquitetura (`docs/revisao-arquitetura.md`)
+  e etapas 8–10 registradas.
+
+Não feito: etapas 0, 2–10. A análise do gargalo concluiu que a limitação é a
+banda da memória fora da GPU, e que só mais canais paralelos atrás de uma porta
+rápida (o banco unificado, HBM, Apple Silicon) ou menos bytes lidos por token
+(MoE, vários tokens por leitura, difusão) resolvem. O repositório fica parado,
+pronto para retomar.
