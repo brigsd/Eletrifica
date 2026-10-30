@@ -52,7 +52,20 @@ trocar um pelo outro e **comparar os dois** (validação cruzada).
   real com a mecânica modelada, lasers desligados no caminho sem dono, banco
   unificado mantido. Pronto: as duas versões geradas pelo mesmo simulador, com
   consumo, temperatura, margens, erros do verificador e bloqueios do
-  `viabilidade.md` lado a lado.
+  `viabilidade.md` lado a lado. Melhorias, na ordem de impacto:
+  1. adaptadores em grade no lugar da célula chaveada (soquete LGA1700 real);
+  2. cobre nos saltos curtos, luz só nos longos;
+  3. guias de luz embutidos em núcleo de vidro no lugar das fibras soltas;
+  4. cerâmica (AlN) sob as peças quentes;
+  5. lasers desligados no caminho de quem não é dono do rank;
+  6. guia de núcleo oco ou com ar (sinal ~30 % mais rápido; ganho ~0,1 ns,
+     entra como folga de tempo na GDDR7 e no CL da ponte).
+
+**Ferramentas pesadas.** openEMS (4), Meep (5), Elmer (6, se em 3D fino), gem5
+e Accel-Sim (7) rodam devagar na VM (4 núcleos, 15 GB): minutos a horas por
+cenário. Rodar com malha e cenário reduzidos na VM só para validar o encaixe do
+motor; o cálculo de verdade espera a etapa 8 (PC do dono). Ramulator/DRAMSys (2)
+e ngspice (3) cabem na VM.
 
 Cada etapa: instalar, documentar no `CLAUDE.md`, teste no pytest (pulado com aviso
 se a ferramenta faltar), job na CI quando couber, relatório gerado por script.
@@ -68,3 +81,4 @@ se a ferramenta faltar), job na CI quando couber, relatório gerado por script.
 - 2026-10-30 — Etapas 8 e 9 acrescentadas: PC do dono (hardware real) como poder de cálculo e como bancada no circuito.
 - 2026-10-30 — Revisão da arquitetura registrada; etapa 10 aberta (modelar a versão revisada ao lado da atual).
 - 2026-10-30 — Etapa 1 concluída (commits 4077d41, cbaf9d3, f3bee15): emulador de manutenção provado ciclo a ciclo; latências medidas no Yosys (seletor 375 ps, detector 275 ps, ponte CL54). Ficou de fora: LFSR, WCK2CK e treino de VREF/CA; RTL das filas e PHY da ponte.
+- 2026-10-30 — Etapa 10 detalhada com as 6 melhorias; ferramentas pesadas (4, 5, 6, 7) dependem da etapa 8 para o cálculo completo.
