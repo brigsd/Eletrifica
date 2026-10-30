@@ -6,3 +6,6 @@ numpy
 scipy
 pillow
 pytest
+# RTL (modulos/rtl): cocotb 1.9, porque o 2.x exige Verilator >= 5.036 e o apt do
+# Ubuntu 24.04 traz o 5.020. Verilator e Yosys vem do apt: apt-get install verilator yosys
+cocotb>=1.9,<2

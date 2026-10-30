@@ -80,14 +80,21 @@ def _tipos(protocolo):
     return {t.codigo: t for t in TABELA[protocolo]}
 
 
-def codificar(protocolo, nome, ma=0, op=0, banco=0, coluna=0):
-    """Palavras de CA (14 bits por ciclo) de um comando."""
+def codificar(protocolo, nome, ma=0, op=0, banco=0, coluna=0, linha=None):
+    """Palavras de CA (14 bits por ciclo) de um comando.
+
+    ACT com `linha` (17 bits): os 3 bits altos da linha no primeiro ciclo (bits 10 a 12),
+    os 14 baixos no segundo. Assim o bit mais alto da linha (o rank do banco unificado)
+    chega no primeiro ciclo, junto com o banco. Comando de um ciclo leva o banco nos bits
+    5 a 9 (o PRE é por banco). O RTL (modulos/rtl) usa esta mesma codificação."""
     t = next(x for x in TABELA[protocolo] if x.nome == nome)
     if t.registrador:
         return [t.codigo | (ma & 0xFF) << 5, op & 0xFF]
     if t.ciclos == 2:
+        if nome == "ACT" and linha is not None:
+            return [t.codigo | (banco & 0x1F) << 5 | ((linha >> 14) & 0x7) << 10, linha & 0x3FFF]
         return [t.codigo | (banco & 0x1F) << 5, coluna & 0x3FF]
-    return [t.codigo]
+    return [t.codigo | (banco & 0x1F) << 5]
 
 
 def decodificar(protocolo, palavras):
@@ -106,11 +113,13 @@ def decodificar(protocolo, palavras):
             if t.registrador:
                 out.append(Comando(t.nome, t.sentido_dq, ((w >> 5) & 0xFF, seg & 0xFF)))
             else:
-                out.append(Comando(t.nome, t.sentido_dq, None,
-                                   {"banco": (w >> 5) & 0x1F, "coluna": seg & 0x3FF}))
+                campos = {"banco": (w >> 5) & 0x1F, "coluna": seg & 0x3FF}
+                if t.nome == "ACT":
+                    campos["linha"] = ((w >> 10) & 0x7) << 14 | (seg & 0x3FFF)
+                out.append(Comando(t.nome, t.sentido_dq, None, campos))
             i += 2
         else:
-            out.append(Comando(t.nome, t.sentido_dq))
+            out.append(Comando(t.nome, t.sentido_dq, None, {"banco": (w >> 5) & 0x1F}))
             i += 1
     return out
 

@@ -2,5 +2,5 @@
 pythonpath = ["."]
 testpaths = ["tests"]
 markers = [
-    "lento: renderiza o Gerber (alguns segundos)",
+    "lento: renderiza o Gerber ou simula o RTL (alguns segundos)",
 ]
