@@ -222,6 +222,13 @@ Regras do modelo:
   temperatura a cada variação) e
   `python3 -m modulos.sistema.levantamento_defeitos` (docs/defeitos.md, ~2 min).
 
+**Revisão da arquitetura:** `projetos/interconexao-optica/docs/revisao-arquitetura.md`
+(2026-10-30): fibra só em distância longa, núcleo de vidro, adaptadores em
+grade no lugar da célula chaveada, socket sem mecânica modelada.
+
+**Planos:** `planos/` na raiz do repositório; um plano ativo por vez, contrato
+em `planos/README.md`. Consulte o plano ativo antes de começar trabalho grande.
+
 **Viabilidade prática:** `projetos/interconexao-optica/docs/viabilidade.md`
 (pesquisa com fontes, 2026-10-28). Os três bloqueios reais: a célula chaveada
 (relé de 1 A e ~20 fF a 0,4 mm não existe), DDR5/GDDR7 por óptica linear (sem

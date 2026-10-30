@@ -45,6 +45,15 @@ trocar um pelo outro e **comparar os dois** (validação cruzada).
   e conferir a calibração da ponte com eles. Pronto: kernel CUDA real lendo o
   que a CPU gravou "pela ponte", com 0 erros e o tempo do banco aplicado.
 
+- [ ] **10. Arquitetura revisada, ao lado da atual.** Da revisão em
+  `projetos/interconexao-optica/docs/revisao-arquitetura.md`: base em núcleo de
+  vidro com guias de luz embutidos, cobre nos saltos curtos, luz só nos longos,
+  peças em adaptadores sobre grade padrão (sem célula chaveada), soquete LGA1700
+  real com a mecânica modelada, lasers desligados no caminho sem dono, banco
+  unificado mantido. Pronto: as duas versões geradas pelo mesmo simulador, com
+  consumo, temperatura, margens, erros do verificador e bloqueios do
+  `viabilidade.md` lado a lado.
+
 Cada etapa: instalar, documentar no `CLAUDE.md`, teste no pytest (pulado com aviso
 se a ferramenta faltar), job na CI quando couber, relatório gerado por script.
 
@@ -57,3 +66,4 @@ se a ferramenta faltar), job na CI quando couber, relatório gerado por script.
 
 - 2026-10-30 — Plano aberto. Etapa 1 já iniciada antes do plano.
 - 2026-10-30 — Etapas 8 e 9 acrescentadas: PC do dono (hardware real) como poder de cálculo e como bancada no circuito.
+- 2026-10-30 — Revisão da arquitetura registrada; etapa 10 aberta (modelar a versão revisada ao lado da atual).
