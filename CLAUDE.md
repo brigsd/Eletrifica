@@ -228,10 +228,12 @@ grade no lugar da célula chaveada, socket sem mecânica modelada.
 
 **Planos:** `planos/` na raiz do repositório; um plano ativo por vez, contrato
 em `planos/README.md`. Consulte o plano ativo antes de começar trabalho grande.
-Plano ativo: `planos/2026-10-30-giro-invertido.md` (modelo de LLM inteiro maior
-que a VRAM: cada giro dos pesos RAM → GPU confere uma árvore de chutes). O de
-motores de simulação foi **encerrado** pelo dono em 2026-10-30 (custo contra
-ganho); o projeto óptico está parado, pronto para retomar.
+Nenhum plano ativo. O de motores de simulação foi **encerrado** (custo contra
+ganho); o do giro invertido foi **cancelado** e virou estudo.
+
+**Estudos:** `estudos/` guarda análises sem implementação. Regra do dono
+(2026-10-30): cada ideia nova fica de pé sozinha; **não puxe** uma ideia nova
+para o contexto de um plano ou estudo existente, nem a apresente assim na conversa.
 
 **Viabilidade prática:** `projetos/interconexao-optica/docs/viabilidade.md`
 (pesquisa com fontes, 2026-10-28). Os três bloqueios reais: a célula chaveada

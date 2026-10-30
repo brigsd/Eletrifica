@@ -148,3 +148,11 @@ PC do dono: i5-13600KF, 32 GB DDR5 (~80 GB/s), RTX 5070 com 12 GB GDDR7
   a conversa sobre o gargalo do LLM (giro dos pesos, sentido inverso, modelos
   inteiros).
 - 2026-10-30 — Etapas 6 e 7 (cache de contexto) acrescentadas a pedido do dono.
+
+## Desfecho
+
+2026-10-30 — **Cancelado** pelo dono antes de qualquer etapa: o assunto vira
+documento de estudo, sem implementação. Conteúdo em
+`estudos/2026-10-30-giro-invertido.md`; as ideias de cache de contexto
+(etapas 6 e 7) saíram para um estudo próprio, sem ligação com o giro
+(`estudos/2026-10-30-cache-de-contexto.md`). Nada feito além do plano.
