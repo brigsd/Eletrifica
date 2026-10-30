@@ -32,6 +32,19 @@ trocar um pelo outro e **comparar os dois** (validação cruzada).
 - [ ] **7. Sistema — gem5 e Accel-Sim.** CPU e GPU reais lendo o banco. Pronto:
   tokens/s simulado comparado com o teto atual.
 
+- [ ] **8. PC do dono como poder de cálculo.** i5-13600KF, 32 GB DDR5, RTX 5070
+  (12 GB GDDR7), ligado à sessão pelo Remote Control (Linux ou WSL). Pronto: os
+  motores pesados (gem5, openEMS, Meep, Accel-Sim) rodando lá, com o resultado
+  voltando ao repositório.
+- [ ] **9. Bancada com hardware no circuito.** A 5070 e o i5 rodam programas
+  reais; uma camada de software no meio imita o banco unificado (mapas de
+  endereço, posse dos ranks, latências medidas no RTL). Não acelera o PC: prova
+  que o software dos dois lados funciona com as regras do banco e mede o que um
+  programa real perde ou ganha. Inclui medir por tempo de acesso o mapa de
+  endereços real da DDR5 do i5 e da GDDR7 da 5070 (métodos DRAMA e GPUHammer)
+  e conferir a calibração da ponte com eles. Pronto: kernel CUDA real lendo o
+  que a CPU gravou "pela ponte", com 0 erros e o tempo do banco aplicado.
+
 Cada etapa: instalar, documentar no `CLAUDE.md`, teste no pytest (pulado com aviso
 se a ferramenta faltar), job na CI quando couber, relatório gerado por script.
 
@@ -43,3 +56,4 @@ se a ferramenta faltar), job na CI quando couber, relatório gerado por script.
 ## Histórico
 
 - 2026-10-30 — Plano aberto. Etapa 1 já iniciada antes do plano.
+- 2026-10-30 — Etapas 8 e 9 acrescentadas: PC do dono (hardware real) como poder de cálculo e como bancada no circuito.
