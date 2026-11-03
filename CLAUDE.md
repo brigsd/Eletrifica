@@ -229,6 +229,10 @@ Regras do modelo:
 (2026-10-30): fibra só em distância longa, núcleo de vidro, adaptadores em
 grade no lugar da célula chaveada, socket sem mecânica modelada.
 
+**Linha de base:** `python3 -m modulos.sistema.linha_de_base` (~2 min) gera
+`projetos/interconexao-optica/docs/linha-de-base.md`, os números de referência do
+sistema atual (0 erros, 58 avisos, quase todos R13).
+
 **Planos:** `planos/` na raiz do repositório; um plano ativo por vez, contrato
 em `planos/README.md`. Consulte o plano ativo antes de começar trabalho grande.
 Plano ativo: `planos/2026-11-03-ponto-perfeito.md` (a placa própria, melhoria por
@@ -266,7 +270,7 @@ Resultados atuais (confira rodando, não confie nestes números):
   ~1.200 ns. Em `enlace.json`, `anel` e `filtro` de uma configuração mesclam
   com os de `comum`.
 - A interconexão dissipa ~149 W dentro da base; só com ar a base chega a
-  ~267 °C. Com a placa fria, ~64 °C. Consumo ~166 W, ~11 pJ/bit: acima dos
+  ~267 °C. Com a placa fria, ~68 °C. Consumo ~166 W, ~11 pJ/bit: acima dos
   ~6,3 de uma ligação elétrica (aviso R14). Os lasers dos caminhos da ponte
   ficam acesos o tempo todo (pior caso).
 - 64 λ por fibra **não fecha** no modelo físico (diafonia); a configuração

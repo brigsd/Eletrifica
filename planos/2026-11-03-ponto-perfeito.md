@@ -49,7 +49,7 @@ Falta para a minhoca:
 
 ## Etapas
 
-- [ ] **0. Linha de base.** Rodar o simulador atual e registrar os números de
+- [x] **0. Linha de base.** Rodar o simulador atual e registrar os números de
   referência (tok/s, erros, consumo, temperatura, boot). Pronto: tabela gerada por
   script.
 - [ ] **1. Simulador de malha.** Módulo novo (topologia de segmentos, rota de
@@ -80,3 +80,4 @@ Falta para a minhoca:
   chave eletrônica dentro do tradutor (serve para sinal, não aguenta 1 A de
   energia). Adaptação proposta: dividir por função, energia por zonas fixas e
   sinal pela chave eletrônica do tradutor. A medir no simulador.
+- 2026-11-03 — Etapa 0 feita: `modulos/sistema/linha_de_base.py` → `docs/linha-de-base.md` (0 erros, 58 avisos, boot 541 ms, 166 W, 68 °C, 38,5 tok/s). Etapa 1 começou: `modulos/malha/` (topologia, rota XY, custo por salto, reserva de tráfego).
