@@ -34,6 +34,9 @@ arquivo junto** — é ele que segura o contexto entre sessões e entre agentes.
   contra teste de bancada.
 - Isto é um **laboratório**: quando uma restrição aparece, resolva no projeto.
   Não troque o conceito por um conjunto de produtos prontos.
+- **Método do dono** (2026-11-03): quando uma solução cria um problema, pergunte
+  primeiro "algo parecido ou melhor resolve isso?"; se não, "como melhorar ou
+  adaptar o que temos?". Cada ciclo vai para o Histórico do plano ativo.
 
 ## Identidade do repositório
 
