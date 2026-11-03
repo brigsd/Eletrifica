@@ -228,10 +228,10 @@ grade no lugar da célula chaveada, socket sem mecânica modelada.
 
 **Planos:** `planos/` na raiz do repositório; um plano ativo por vez, contrato
 em `planos/README.md`. Consulte o plano ativo antes de começar trabalho grande.
-Plano ativo: `planos/2026-10-30-teste-em-casa.md` (o dono roda o Qwen3.8-Flash-Next
-no PC dele, rumo ao teto de ~25 a 40 tok/s do estudo dos gargalos). O de motores
-de simulação foi **encerrado** (custo contra ganho); o do giro invertido foi
-**cancelado** e virou estudo.
+Plano ativo: `planos/2026-11-03-ponto-perfeito.md` (a placa própria, melhoria por
+melhoria; 1º vetor: a minhoca, segmentos com controle local e dados de vizinho
+em vizinho no lugar da célula chaveada). Cancelados: o teste em casa e o giro
+invertido (virou estudo). Encerrado: motores de simulação.
 
 **Estudos:** `estudos/` guarda análises sem implementação. Regra do dono
 (2026-10-30): cada ideia nova fica de pé sozinha; **não puxe** uma ideia nova

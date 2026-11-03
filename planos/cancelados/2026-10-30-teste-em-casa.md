@@ -75,3 +75,10 @@ mesmo formato.
 
 - 2026-10-30 — Plano aberto a pedido do dono ("quero fazer um teste em casa para
   tentar chegar nessa velocidade"), a partir do estudo dos gargalos.
+
+## Desfecho
+
+2026-11-03 — **Cancelado** pelo dono antes de qualquer etapa: o foco passou para
+o plano da placa própria (`planos/2026-11-03-ponto-perfeito.md`). Nada medido.
+O estudo `estudos/2026-10-30-gargalos-do-llm.md` continua valendo e o teste pode
+voltar como plano futuro.
