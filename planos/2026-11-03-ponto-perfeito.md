@@ -14,6 +14,14 @@ Ponto de partida: o banco unificado (0 erros, boot ~540 ms, 70B em 4 bits com
 teto de ~38 tok/s). Restrições conhecidas: célula chaveada (o relé não existe),
 GDDR7 por luz (sem evidência), calor (~149 W na base), plataforma Intel.
 
+## Método (dono, 2026-11-03)
+
+Quando algo resolve um problema mas cria outro:
+1. **Algo parecido ou melhor resolve isso?** Procurar alternativas conhecidas.
+2. **Se não:** como melhorar ou adaptar o que temos?
+
+Cada ciclo vira uma linha no Histórico: o problema, as alternativas, a escolha.
+
 ## 1º vetor: minhoca
 
 | Minhoca | Placa | Ataca |
@@ -65,3 +73,10 @@ Falta para a minhoca:
 ## Histórico
 
 - 2026-11-03 — Plano aberto.
+- 2026-11-03 — Ciclo 1, problema: a minhoca leva os dados entre segmentos, mas a
+  peça cai em qualquer posição e algo precisa ligar cada pino ao fio certo.
+  Alternativas: adaptador em grade (existe, mas a posição fica presa à grade);
+  conector que só conduz na vertical (resolve o contato, não diz qual pino é qual);
+  chave eletrônica dentro do tradutor (serve para sinal, não aguenta 1 A de
+  energia). Adaptação proposta: dividir por função, energia por zonas fixas e
+  sinal pela chave eletrônica do tradutor. A medir no simulador.
