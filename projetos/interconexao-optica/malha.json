@@ -1,0 +1,91 @@
+{
+  "_leia": "Fonte dos parametros da malha de segmentos (minhoca). Pesquisa de 2026-11-05; ver docs/malha-parametros.md. Cada numero tem um campo irmao _fonte_<nome>. 'estimativa' = sem datasheet; 'derivado' = conta sobre dados da fonte.",
+
+  "passo_mm": 25.0,
+  "_fonte_passo_mm": "decisao de projeto (plano ponto-perfeito); UCIe padrao cobre ate 25 mm: https://www.tomshardware.com/news/new-ucie-chiplet-standard-supported-by-intel-amd-and-arm (secundaria)",
+
+  "camadas_sinal": 4,
+  "_fonte_camadas_sinal": "estimativa: 4 camadas stripline de sinal numa placa de ~10 camadas; BGA breakout em 4 camadas: https://rfessentials.com/rf-knowledge-base/how-do-i-design-the-breakout-region-from-a-bga-to-pcb-traces-for-a-high-speed-fp/",
+
+  "trilhas_por_mm_por_camada": 2.6,
+  "_fonte_trilhas_por_mm_por_camada": "derivado: trilha 5 mil + folga 10 mil = 15 mil = 0,38 mm por trilha single-ended (2,6/mm); par diferencial 5/5/5 + 3W de 15 mil = 30 mil = 0,76 mm (1,3 pares/mm): https://www.atlaspcb.com/blog/differential-pair-routing-tight-vs-loose-coupling/ (blog de fabricante)",
+  "pares_por_mm_por_camada": 1.3,
+  "_fonte_pares_por_mm_por_camada": "derivado da linha acima (regra 3W, https://www.allpcb.com/blog/pcb-design/differential-pair-routing-techniques.html)",
+  "aproveitamento_borda": 0.5,
+  "_fonte_aproveitamento_borda": "estimativa: metade da borda perdida a vias, energia e terra, curvas de escape",
+
+  "faixas_por_ligacao": 32,
+  "_fonte_faixas_por_ligacao": "derivado: 25 mm x 1,3 pares/mm x 4 camadas x 0,5 = 65 pares; divididos entre os dois sentidos = 32 por sentido",
+  "gbps_por_faixa": 32.0,
+  "_fonte_gbps_por_faixa": "PCIe 5 = 32 GT/s NRZ, Nyquist 16 GHz: https://electronicdesign.com/technologies/communications/article/21267698/astera-labs-how-to-manage-the-pcie-50-channel-insertion-loss-budget ; GDDR7 32 Gb/s por pino PAM3 (~21,3 GBd): https://www.jedec.org/node/9394",
+
+  "retemporizacao_ns": 5.0,
+  "_fonte_retemporizacao_ns": "datasheet: retimer PCIe5 em modo baixa latencia <5 ns (Phison PS7201), ~10 ns (Kandou KB9001); modo normal 64 ns tipico: https://www.phison.com/images/products_datasheet/redriver/Public_PS7201_PCIe_Gen5_Retimer_IC_Datasheet_v3.9.pdf",
+  "retemporizacao_ns_otimista": 2.0,
+  "_fonte_retemporizacao_ns_otimista": "UCIe TX+RX <2 ns (12 UI): https://www.synopsys.com/designware-ip/technical-bulletin/ucie-multi-die-socs.html ; so vale para PHY de curto alcance, nao para 25 mm de FR4",
+  "retemporizacao_ns_pcie_conformante": 64.0,
+  "_fonte_retemporizacao_ns_pcie_conformante": "limite da especificacao PCIe por retimer em modo normal (nao-SRIS): https://www.phison.com/retimer-ic/",
+
+  "pj_por_bit_salto": 3.0,
+  "_fonte_pj_por_bit_salto": "estimativa entre UCIe 0,25-0,6 pJ/bit (curto alcance) e retimer PCIe5 ~2,2-4,5 pJ/bit (derivado de 2,3 W/x16 de fonte de terceiros): https://www.seekcomp.com/article/bGpxLTkwNjU=",
+  "pj_por_bit_salto_faixa": [0.5, 4.5],
+  "_fonte_pj_por_bit_salto_faixa": "UCIe: https://www.synopsys.com/designware-ip/technical-bulletin/ucie-multi-die-socs.html ; retimer: ver linha acima",
+
+  "ps_por_mm": {
+    "fr4": 6.9,
+    "megtron6": 6.2,
+    "megtron7": 6.2
+  },
+  "_fonte_ps_por_mm": "derivado: 85 ps/pol x raiz(Dk)/25,4; Dk 4,2 -> 6,9; Dk 3,4 -> 6,2; Intel lista FR4 182 ps/pol e Megtron 6 156 ps/pol (stripline): https://intel.com/content/www/us/en/docs/programmable/683073/current/determine-the-delay.html",
+
+  "perda_db_por_mm": {
+    "fr4": 0.060,
+    "megtron6": 0.020,
+    "megtron7": 0.015
+  },
+  "perda_db_por_mm_faixa": {
+    "fr4": [0.051, 0.079],
+    "megtron6": [0.013, 0.033],
+    "megtron7": [0.011, 0.025]
+  },
+  "_fonte_perda_db_por_mm": "a 16 GHz. TI: FR4 1,289 dB/pol, Megtron 6 0,336 dB/pol: https://ti.com/document-viewer/lit/html/SNLA426/GUID-ECB0A154-6208-45B4-BADE-2C989C251EB3 ; Intel a 14 GHz, trilha 5 mil: FR4 ~2 dB/pol, Megtron 6 0,85 dB/pol: https://intel.com/content/www/us/en/docs/programmable/683132/current/pcb-stackup-selection-guideline.html . Megtron 7: sem valor a 16 GHz achado (so grafico no datasheet; ~25 dB/m a 12,5 GHz, https://eetimes.itmedia.co.jp/ee/spv/1406/06/news044.html) -> estimativa",
+  "fator_perda_gddr7_pam3": 0.7,
+  "_fonte_fator_perda_gddr7_pam3": "estimativa: Nyquist do PAM3 a 32 Gb/s ~10,7 GHz, perda ~0,7x a de 16 GHz (perda quase linear em f); o PAM3 gasta ~9,5 dB de margem de olho a mais que NRZ (conta: 20 log 2)",
+  "material_padrao": "megtron6",
+
+  "orcamento_perda_canal_db": {
+    "PCIe5": 36.0,
+    "PCIe4": 28.0,
+    "GDDR7-32": null,
+    "DDR5-4800": null
+  },
+  "_fonte_orcamento_perda_canal_db": "PCIe5: 36 dB a 16 GHz fim a fim (placa-base 16 dB, CEM 1,5 dB, AIC 9,5 dB, raiz 9 dB): https://www.asteralabs.com/?p=18375 ; margem recomendada 10-20 %. PCIe4: 28 dB a 8 GHz (memoria, nao verificado nesta pesquisa). GDDR7 e DDR5: nao achei numero publico (JESD239 e JESD79-5 sao fechados) -> null",
+
+  "orcamento_ns": {
+    "GDDR7-32": 5.0,
+    "DDR5-4800": 5.8,
+    "PCIe5": 128.0,
+    "PCIe4": 128.0
+  },
+  "orcamento_ns_ida_e_volta": {
+    "GDDR7-32": 10.0,
+    "DDR5-4800": 11.7,
+    "PCIe5": 256.0,
+    "PCIe4": 256.0
+  },
+  "_fonte_orcamento_ns": "orcamento = atraso EXTRA de ida; o comando vai e o dado volta, entao a latencia vista pelo controlador soma 2x. DDR5: registrador de CL cobre CL22 a CL66 (https://www.anandtech.com/show/16143); projeto usa CL38 a 4800 -> 28 tCK x 0,417 ns = 11,7 ns de ida e volta -> 5,8 ida (derivado). PCIe: a especificacao admite ate 2 retimers de 64 ns cada = 128 ns (https://www.phison.com/retimer-ic/; limite 64 ns por retimer). GDDR7: SEM FONTE para a faixa de RL; 10 ns ida e volta e estimativa (referencia do projeto: 12 ns de RL, ver protocolos.py)",
+
+  "skew_max_ps": {
+    "GDDR7-32": 4.7,
+    "DDR5-4800": 20.8,
+    "PCIe5": 9.4,
+    "PCIe4": 18.75
+  },
+  "_fonte_skew_max_ps": "residual DEPOIS do treino de deskew por bit, convencao 10 % UI (memoria) e 30 % UI (PCIe) ja usada em modulos/dados/protocolos.py; estimativa, nao e numero de datasheet. O ps da linha de atraso por bit depende do PHY (nao achei publico): https://hsiolab.pages.dev/ddr/validation/high-speed/",
+  "skew_treinavel_ps": {
+    "DDR5-4800": 208.0,
+    "GDDR7-32": null,
+    "PCIe5": null
+  },
+  "_fonte_skew_treinavel_ps": "DDR5: nivelamento de escrita aceita DQS a -0,5 tCK do CK (0,5 x 416,7 ps) segundo patente que cita o JESD79-5: https://patents.justia.com/patent/20190235760 ; resolucao de 1 tCK no nivelamento interno. GDDR7 e PCIe: sem valor publico achado"
+}
