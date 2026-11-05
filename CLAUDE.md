@@ -180,8 +180,10 @@ Regras do modelo:
 - **Nada é conectado por mágica.** `modulos/conexoes/construir.py` monta a
   netlist com cada salto de cada sinal (célula, trilha, chip tradutor, laser,
   fibra, receptor, driver), mais energia, controle e relógio de cada bloco.
-  `verificador.py` confere 20 regras (R13 temperatura e R14 consumo usam o
+  `verificador.py` confere 22 regras (R13 temperatura e R14 consumo usam o
   contexto de `contexto.py`, montado da simulação térmica e de energia);
+  R21 (atraso) e R22 (ocupação) da malha só rodam com `"malha"` no contexto
+  (`modulos/malha/montar.py`, `avaliar`);
   `modulos/sistema/boot.py` liga o sistema
   como máquina de estados sobre essa netlist. Um módulo novo que crie
   conexões tem de entrar na netlist, senão o verificador não o enxerga.

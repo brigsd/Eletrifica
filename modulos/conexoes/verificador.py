@@ -20,7 +20,7 @@ REGRAS = ("R01-caminho", "R02-sentido", "R03-padrao", "R04-banda", "R05-optico",
           "R06-energia", "R07-controle", "R08-capacidade", "R09-tempo", "R10-relogio",
           "R11-requisito", "R12-orfao", "R13-temperatura", "R14-consumo",
           "R15-decodificacao", "R16-ajuste", "R17-pcie", "R18-memoria-compartilhada",
-          "R19-posse", "R20-banco")
+          "R19-posse", "R20-banco", "R21-malha-atraso", "R22-malha-ocupacao")
 
 # capacidades que melhoram o sistema mas não impedem o boot (R18 avisa)
 OPCIONAIS = {"memoria-compartilhada"}
@@ -1326,6 +1326,31 @@ def _r20(net, rel):
                                           f"{MU.TOLERANCIA_DESALINHAMENTO_PS:.1f} ps"))
 
 
+# ------------------------------------------------------------- malha
+# Só rodam quando o contexto traz "malha" (o dict de modulos.malha.montar.avaliar).
+
+def _r21(net, rel, contexto):
+    R = "R21-malha-atraso"
+    malha = (contexto or {}).get("malha")
+    if not malha:
+        return
+    for f in malha["fora_do_orcamento"]:
+        rel.violacoes.append(Violacao(R, "erro", f["nome"],
+                                      f"{f['nome']} ({f['protocolo']}): {f['saltos']} saltos, atraso "
+                                      f"{f['atraso_ns']:.1f} ns > orçamento {f['orcamento_ns']:.0f} ns"))
+
+
+def _r22(net, rel, contexto):
+    R = "R22-malha-ocupacao"
+    malha = (contexto or {}).get("malha")
+    if not malha:
+        return
+    for lig, ocup in malha["acima_de_100"]:
+        alvo = f"malha:{lig[0]}-{lig[1]}"
+        rel.violacoes.append(Violacao(R, "erro", alvo,
+                                      f"ligação {lig[0]}-{lig[1]} com {ocup * 100:.0f} % da capacidade"))
+
+
 def verificar(netlist, contexto=None):
     """Roda as regras e devolve um Relatorio."""
     rel = Relatorio()
@@ -1351,4 +1376,6 @@ def verificar(netlist, contexto=None):
     _r18(netlist, rel)
     _r19(netlist, rel)
     _r20(netlist, rel)
+    _r21(netlist, rel, contexto)
+    _r22(netlist, rel, contexto)
     return rel

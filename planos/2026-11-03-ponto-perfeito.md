@@ -81,3 +81,9 @@ Falta para a minhoca:
   energia). Adaptação proposta: dividir por função, energia por zonas fixas e
   sinal pela chave eletrônica do tradutor. A medir no simulador.
 - 2026-11-03 — Etapa 0 feita: `modulos/sistema/linha_de_base.py` → `docs/linha-de-base.md` (0 erros, 58 avisos, boot 541 ms, 166 W, 68 °C, 38,5 tok/s). Etapa 1 começou: `modulos/malha/` (topologia, rota XY, custo por salto, reserva de tráfego).
+- 2026-11-05 — Malha ligada ao sistema real (`modulos/malha/montar.py`) e regras
+  R21 (atraso) e R22 (ocupação). Ciclo 2, problema: com passo de 25 mm e 64 faixas
+  de 32 Gb/s por ligação, a montagem atual não fecha: 7 saltos no pior caso,
+  11,7 ns contra 10 da GDDR7 (8 erros R21), ligações junto à GPU e à ponte a até
+  900 % (29 erros R22), 269 W. Causa: os 12 enlaces de memória (~136 GB/s cada)
+  convergem na GPU e a rota XY empilha todos nas mesmas ligações.

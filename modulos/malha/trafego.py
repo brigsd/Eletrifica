@@ -17,6 +17,7 @@ class Fluxo:
     origem: tuple
     destino: tuple
     gbs: float                   # GB/s reservados
+    protocolo: str = ""          # protocolo nativo do enlace (opcional)
 
 
 @dataclass
