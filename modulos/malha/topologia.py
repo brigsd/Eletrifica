@@ -24,12 +24,17 @@ class Malha:
     # Extensões opcionais (a API antiga não as usa):
     capacidades: dict = field(default_factory=dict, hash=False)   # ligação vizinha -> GB/s (override)
     expressas: dict = field(default_factory=dict, hash=False)     # ligação expressa -> GB/s
+    comprimentos: dict = field(default_factory=dict, hash=False)  # ligação -> mm (desvio de trilha)
+    tipo_salto: str = "retransmite"      # "retransmite" ou "chave" (ver custo.py)
+    params: object = field(default=None, hash=False, compare=False)   # parametros.Parametros; None = malha.json
 
     def __post_init__(self):
         if self.colunas < 1 or self.linhas < 1:
             raise ValueError("a malha precisa de pelo menos 1 coluna e 1 linha")
         if self.passo_mm <= 0 or self.faixas_por_ligacao < 1 or self.gbps_por_faixa <= 0:
             raise ValueError("passo, faixas e gbps por faixa têm de ser positivos")
+        if self.tipo_salto not in ("retransmite", "chave"):
+            raise ValueError(f"tipo de salto desconhecido: {self.tipo_salto!r}")
 
     def segmentos(self):
         return [(x, y) for y in range(self.linhas) for x in range(self.colunas)]
@@ -80,8 +85,23 @@ class Malha:
             raise ValueError("capacidade tem de ser positiva")
         return replace(self, expressas={**self.expressas, ligacao(a, b): gbs})
 
+    def com_tipo_salto(self, tipo):
+        """Nova malha com outro tipo de salto: "retransmite" (padrão) ou "chave"."""
+        return replace(self, tipo_salto=tipo)
+
+    def com_comprimento(self, lig, mm):
+        """Nova malha em que uma ligação tem `mm` de trilha (desvio/meandro), em vez do passo."""
+        lig = ligacao(*lig)
+        if mm <= 0:
+            raise ValueError("comprimento tem de ser positivo")
+        self.capacidade_gbs(lig)       # valida
+        return replace(self, comprimentos={**self.comprimentos, lig: mm})
+
     def comprimento_mm(self, lig):
         """Comprimento da ligação: o passo para vizinhos, a reta entre centros para expressas."""
+        lig = ligacao(*lig)
+        if lig in self.comprimentos:
+            return self.comprimentos[lig]
         a, b = lig
         return math.hypot(a[0] - b[0], a[1] - b[1]) * self.passo_mm
 

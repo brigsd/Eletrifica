@@ -98,3 +98,8 @@ Falta para a minhoca:
   custos antigos. Só a fibra gigante mexe no atraso; fibra gigante + ligações largas
   zera R21 e R22 (1 salto, 2,4 ns, 83 W, 53 %). O pior atraso vem da PONTE-MEM, não da
   GPU-MEM.
+- 2026-11-05 — Física real na malha: `malha.json` alimenta `custo`/`montar` (carregador
+  `modulos/malha/parametros.py`), 32 faixas por sentido, orçamento de IDA. Com 5 ns de retimer
+  nenhuma alternativa de retransmissão fecha a GDDR7 (5 ns), nem 1 salto. 5ª alternativa: salto
+  por chave (0,15 ns, 0,3 pJ/bit, estimativa) com retimer a cada N segmentos pela perda
+  (R23); R24 (desalinhamento) e calor/temperatura na comparação. Ver `docs/malha-alternativas.md`.

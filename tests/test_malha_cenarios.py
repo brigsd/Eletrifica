@@ -3,6 +3,7 @@ import pytest
 
 from modulos.malha import cenarios as CE
 from modulos.malha import custo
+from modulos.malha.parametros import FALLBACK as FIXOS
 from modulos.malha.rota import caminhos, rota_com_expressa, rota_yx
 from modulos.malha.topologia import Malha, ligacao
 from modulos.malha.trafego import Fluxo, reservar
@@ -11,7 +12,7 @@ from modulos.malha.trafego import Fluxo, reservar
 @pytest.fixture
 def m():
     # 6x6, capacidade padrão 2 GB/s por ligação, passo 10 mm
-    return Malha(colunas=6, linhas=6, passo_mm=10.0, faixas_por_ligacao=1, gbps_por_faixa=16.0)
+    return Malha(colunas=6, linhas=6, passo_mm=10.0, faixas_por_ligacao=1, gbps_por_faixa=16.0, params=FIXOS)
 
 
 # ----------------------------------------------------------- rápidos
@@ -59,12 +60,12 @@ def test_expressa_e_um_salto_com_atraso_da_distancia(m):
     r = reservar(me, [Fluxo("f", (0, 0), (5, 0), 4.0, expressa=((0, 0), (5, 0)))])
     (res,) = r.fluxos
     assert res.saltos == 1
-    assert res.atraso_ns == pytest.approx(custo.atraso_ligacao_ns(50.0))
+    assert res.atraso_ns == pytest.approx(custo.atraso_ligacao_ns(50.0, FIXOS))
     # o caminho comum teria 5 saltos
     comum = reservar(m, [Fluxo("f", (0, 0), (5, 0), 4.0)]).fluxos[0]
     assert res.atraso_ns < comum.atraso_ns
     assert r.ocupacao[ligacao((0, 0), (5, 0))] == pytest.approx(0.4)
-    assert res.energia_pj_bit == custo.energia_pj_por_bit(1)
+    assert res.energia_pj_bit == custo.energia_pj_por_bit(1, FIXOS)
 
 
 def test_expressa_sem_fluxo_marcado_nao_e_usada(m):
@@ -95,7 +96,7 @@ def test_expressa_invalida(m):
 def test_api_antiga_inalterada(m):
     r = reservar(m, [Fluxo("f", (0, 0), (2, 1), 1.0)])
     assert r.fluxos[0].saltos == 3
-    assert r.fluxos[0].atraso_ns == pytest.approx(custo.atraso_caminho_ns(3, 10.0))
+    assert r.fluxos[0].atraso_ns == pytest.approx(custo.atraso_caminho_ns(3, 10.0, FIXOS))
     assert len(m.ligacoes()) == len(m.todas_ligacoes())
 
 
@@ -124,8 +125,11 @@ def test_fibra_gigante_corta_saltos_e_atraso(real):
     a, f = CE.atual(plano, base), CE.fibra_gigante(plano, base)
     assert f["resumo"]["saltos_max"] == 1
     assert f["resumo"]["atraso_max_ns"] < a["resumo"]["atraso_max_ns"]
-    assert f["resumo"]["erros_r21"] == 0
+    # com a retemporização real (5 ns), até 1 salto estoura os 5 ns da GDDR7: só o salto por chave fecha
+    assert 0 < f["resumo"]["erros_r21"] <= a["resumo"]["erros_r21"]
     assert f["extras"]["expressas"] > 0
+    fixa = CE.combinar(plano, base, nome="x", expressas=True, params=FIXOS)     # custos antigos
+    assert fixa["resumo"]["erros_r21"] == 0
 
 
 @pytest.mark.lento
@@ -161,21 +165,28 @@ def test_memoria_colada_tem_um_salto_para_a_gpu(real):
     c = CE.memoria_colada(plano, base)
     assert c["extras"]["gpu_mem_saltos_max"] == 1
     gpu = [d for d in c["fluxos"] if d["nome"].startswith("GPU-MEM")]
-    assert gpu and all(d["saltos"] == 1 and d["folga_ns"] >= 0 for d in gpu)
+    assert gpu and all(d["saltos"] == 1 for d in gpu)
+    # 1 salto = 5 ns de retimer + 25 mm de cobre: um pouco acima dos 5,0 ns da GDDR7
+    assert all(d["atraso_ns"] == pytest.approx(5.0 + 25 * 6.2 / 1000) and d["folga_ns"] < 0 for d in gpu)
 
 
 @pytest.mark.lento
 def test_combinacao_fecha_r21_e_r22(real):
     plano, base = real
-    r = CE.combinar(plano, base, nome="x", expressas=True, largas=True)
+    r = CE.combinar(plano, base, nome="x", expressas=True, largas=True, params=FIXOS)
     assert r["resumo"]["erros_r21"] == 0 and r["resumo"]["erros_r22"] == 0
+    real = CE.combinar(plano, base, nome="y", expressas=True, largas=True)       # malha.json
+    assert real["resumo"]["erros_r22"] == 0 and real["resumo"]["erros_r21"] > 0
 
 
 @pytest.mark.lento
 def test_todos_devolve_o_resumo_do_avaliar(real):
     plano, base = real
     for r in CE.todos(plano, base):
-        for k in ("saltos_max", "atraso_max_ns", "potencia_w", "ocupacao_max", "erros_r21", "erros_r22"):
+        for k in ("saltos_max", "atraso_max_ns", "potencia_w", "ocupacao_max", "erros_r21", "erros_r22",
+                  "erros_r23", "erros_r24", "trecho_db_max", "desalinhamento_max_ps"):
             assert k in r["resumo"]
         assert r["resumo"]["erros_r21"] == len(r["fora_do_orcamento"])
         assert r["resumo"]["erros_r22"] == len(r["acima_de_100"])
+        assert r["resumo"]["erros_r23"] == len(r["fora_da_perda"])
+        assert r["resumo"]["erros_r24"] == len(r["fora_do_skew"])

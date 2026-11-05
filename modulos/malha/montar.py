@@ -7,34 +7,38 @@ orçamento do seu protocolo. Os números de MALHA_* e ORCAMENTO_NS são ESTIMATI
 """
 import math
 
+from modulos.malha import parametros
 from modulos.malha.topologia import Malha
 from modulos.malha.trafego import Fluxo, reservar
 
-# Estimativas, a confirmar com o projeto da placa:
-MALHA_PASSO_MM = 25.0          # lado de cada segmento quadrado sobre a base
-MALHA_FAIXAS = 64              # faixas paralelas em cada ligação entre vizinhos
-MALHA_GBPS_POR_FAIXA = 32.0    # taxa de cada faixa
-
-# Atraso extra (ns) que cada protocolo aceita além do caminho direto.
-ORCAMENTO_NS = {
-    "GDDR7-32": 10.0,    # estimativa: janela de treino do banco, pouca folga
-    "DDR5-4800": 15.0,   # estimativa: folga do CL/RL da DDR5 sem reajuste
-    "PCIe5": 100.0,      # estimativa: PCIe tolera latência de dezenas de ns
-    "PCIe4": 100.0,
-}
-ORCAMENTO_PADRAO_NS = 20.0   # protocolos sem entrada acima (estimativa)
+# Fallback (só se o malha.json faltar); o valor de verdade vem de `parametros.carregar()`.
+MALHA_PASSO_MM = parametros.FALLBACK.passo_mm
+MALHA_FAIXAS = parametros.FALLBACK.faixas_por_ligacao
+MALHA_GBPS_POR_FAIXA = parametros.FALLBACK.gbps_por_faixa
+ORCAMENTO_NS = dict(parametros.FALLBACK.orcamento_ns)
+ORCAMENTO_PADRAO_NS = parametros.FALLBACK.orcamento_ns_padrao
 
 
-def orcamento_ns(protocolo):
-    return ORCAMENTO_NS.get(protocolo, ORCAMENTO_PADRAO_NS)
+def orcamento_ns(protocolo, params=None):
+    """Atraso extra de IDA que o protocolo aceita (ns). Compare com o atraso de ida do fluxo."""
+    return (params or parametros.carregar()).orcamento(protocolo)
 
 
-def malha_da_base(base, passo_mm=MALHA_PASSO_MM, faixas=MALHA_FAIXAS, gbps=MALHA_GBPS_POR_FAIXA):
-    """Malha de segmentos que cobre a área inteira da base (arredonda para cima)."""
+def malha_da_base(base, passo_mm=None, faixas=None, gbps=None, params=None, tipo_salto="retransmite"):
+    """Malha de segmentos que cobre a área inteira da base (arredonda para cima).
+
+    Passo, faixas (por sentido) e taxa vêm de `params` (padrão: malha.json). A capacidade
+    de uma ligação é faixas × taxa: o pior caso é o fluxo inteiro num só sentido.
+    """
+    p = params or parametros.carregar()
+    passo_mm = p.passo_mm if passo_mm is None else passo_mm
+    faixas = p.faixas_por_ligacao if faixas is None else faixas
+    gbps = p.gbps_por_faixa if gbps is None else gbps
     colunas = max(1, math.ceil(base.largura / passo_mm - 1e-9))
     linhas = max(1, math.ceil(base.profundidade / passo_mm - 1e-9))
     return Malha(colunas=colunas, linhas=linhas, passo_mm=passo_mm,
-                 faixas_por_ligacao=faixas, gbps_por_faixa=gbps)
+                 faixas_por_ligacao=faixas, gbps_por_faixa=gbps,
+                 tipo_salto=tipo_salto, params=p)
 
 
 def segmento_de(malha, ponto):
@@ -61,24 +65,27 @@ def fluxos_do_plano(plano, malha):
     return fluxos
 
 
-def avaliar(plano, base, malha=None):
+def avaliar(plano, base, malha=None, params=None):
     """Reserva os fluxos do plano na malha e devolve reserva, atrasos e resumo.
 
     `fora_do_orcamento` lista os fluxos cujo atraso passa do orçamento do protocolo;
-    `acima_de_100` lista as ligações com ocupação acima da capacidade. São as duas
-    entradas que o verificador usa nas regras R21 e R22.
+    `acima_de_100` lista as ligações com ocupação acima da capacidade; `fora_da_perda`
+    os fluxos com trecho acima do orçamento de perda; `fora_do_skew` os com
+    desalinhamento acima do limite. São as entradas das regras R21 a R24.
     """
-    malha = malha or malha_da_base(base)
+    malha = malha or malha_da_base(base, params=params)
     return avaliar_fluxos(fluxos_do_plano(plano, malha), malha)
 
 
 def avaliar_fluxos(fluxos, malha):
     """Como `avaliar`, mas com os fluxos já montados (cenários alternativos)."""
     reserva = reservar(malha, fluxos)
+    p = malha.params or parametros.carregar()
 
     detalhes = []
     for f, r in zip(fluxos, reserva.fluxos):
-        orc = orcamento_ns(f.protocolo)
+        orc = p.orcamento(f.protocolo)          # atraso extra de ida, como `r.atraso_ns`
+        lim = p.limite_skew_ps(f.protocolo)
         detalhes.append({
             "nome": f.nome,
             "protocolo": f.protocolo,
@@ -86,14 +93,25 @@ def avaliar_fluxos(fluxos, malha):
             "atraso_ns": r.atraso_ns,
             "orcamento_ns": orc,
             "folga_ns": orc - r.atraso_ns,
+            "trecho_db": r.trecho_db,
+            "orcamento_perda_db": p.orcamento_perda_trecho_db,
+            "retemporizacoes": r.retemporizacoes,
+            "desalinhamento_ps": r.desalinhamento_ps,
+            "limite_skew_ps": lim,
         })
     fora = [d for d in detalhes if d["folga_ns"] < 0]
+    fora_perda = [d for d in detalhes if d["trecho_db"] > d["orcamento_perda_db"] + 1e-9]
+    fora_skew = [d for d in detalhes
+                 if d["limite_skew_ps"] is not None and d["desalinhamento_ps"] > d["limite_skew_ps"] + 1e-9]
     ocupacoes = list(reserva.ocupacao.values())
     resumo = {
         "saltos_max": max((d["saltos"] for d in detalhes), default=0),
         "atraso_max_ns": max((d["atraso_ns"] for d in detalhes), default=0.0),
         "potencia_w": reserva.potencia_w,
         "ocupacao_max": max(ocupacoes, default=0.0),
+        "trecho_db_max": max((d["trecho_db"] for d in detalhes), default=0.0),
+        "retemporizacoes_max": max((d["retemporizacoes"] for d in detalhes), default=0),
+        "desalinhamento_max_ps": max((d["desalinhamento_ps"] for d in detalhes), default=0.0),
     }
     return {
         "malha": malha,
@@ -101,5 +119,7 @@ def avaliar_fluxos(fluxos, malha):
         "fluxos": detalhes,
         "fora_do_orcamento": fora,
         "acima_de_100": reserva.acima_de_100,
+        "fora_da_perda": fora_perda,
+        "fora_do_skew": fora_skew,
         "resumo": resumo,
     }

@@ -61,7 +61,7 @@ modulos/      ferramentas por objetivo; cada pasta é um módulo Python
   pcb/          engenharia reversa de PCB a partir do Gerber
   componentes/  modelos das peças do projeto óptico
   sistema/      base de células, chave da célula, sondagem, identificação, boot, simulação
-  conexoes/     netlist do sistema inteiro + verificador (18 regras) + sensibilidade
+  conexoes/     netlist do sistema inteiro + verificador (24 regras) + sensibilidade
   energia/ termico/ optica/ dados/   simuladores
   visual/       cena 3D e gráficos SVG
   rtl/          Verilog do banco unificado (hdl/), testes cocotb (cocotb/), síntese Yosys
@@ -180,10 +180,12 @@ Regras do modelo:
 - **Nada é conectado por mágica.** `modulos/conexoes/construir.py` monta a
   netlist com cada salto de cada sinal (célula, trilha, chip tradutor, laser,
   fibra, receptor, driver), mais energia, controle e relógio de cada bloco.
-  `verificador.py` confere 22 regras (R13 temperatura e R14 consumo usam o
+  `verificador.py` confere 24 regras (R13 temperatura e R14 consumo usam o
   contexto de `contexto.py`, montado da simulação térmica e de energia);
-  R21 (atraso) e R22 (ocupação) da malha só rodam com `"malha"` no contexto
-  (`modulos/malha/montar.py`, `avaliar`);
+  R21 (atraso de ida), R22 (ocupação), R23 (perda por trecho) e R24 (desalinhamento entre
+  as faixas de um fluxo) da malha só rodam com `"malha"` no contexto
+  (`modulos/malha/montar.py`, `avaliar`; parâmetros de `malha.json` via
+  `modulos/malha/parametros.py`; calor em `modulos/malha/calor.py`);
   `modulos/sistema/boot.py` liga o sistema
   como máquina de estados sobre essa netlist. Um módulo novo que crie
   conexões tem de entrar na netlist, senão o verificador não o enxerga.

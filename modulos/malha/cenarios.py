@@ -1,17 +1,22 @@
-"""Quatro alternativas para a malha, medidas pelas mesmas regras (R21 atraso, R22 ocupação).
+"""Cinco alternativas para a malha, medidas pelas mesmas regras (R21 atraso, R22 ocupação,
+R23 perda por trecho, R24 desalinhamento entre as faixas de um fluxo).
 
     1. fibra_gigante      ligações expressas que pulam vários segmentos de uma vez
     2. ligacoes_largas    capacidade por ligação ajustada onde precisa (e, opcional,
                           peça grande: a GPU ocupa vários segmentos)
     3. rotas_espalhadas   cada fluxo dividido entre XY e YX (mesmos saltos)
     4. memoria_colada     chips de memória vizinhos da GPU (fluxo de 1 salto)
+    5. salto_chave        o salto só desvia o sinal por chave analógica (~0,15 ns,
+                          ~0,3 pJ/bit, ESTIMATIVAS); retimer obrigatório quando a perda
+                          acumulada do cobre passaria do orçamento por trecho
 
 Cada função parte do `plano` e da `base` reais e devolve o mesmo dicionário de
 `montar.avaliar`, com `resumo` acrescido de `erros_r21`/`erros_r22` (o que o
 verificador daria) e a chave `extras` (o que a alternativa custou). `combinar`
 junta as alternativas na ordem: colada, peça grande, expressas, espalhadas, largas.
 
-Custo e atraso vêm de `custo.py` e são ESTIMATIVAS; aqui nada os altera. A expressa
+Custo, atraso e perda vêm de `custo.py`/`parametros.py` (malha.json); o salto por chave
+e o orçamento de perda de GDDR7/DDR5 são ESTIMATIVAS. A expressa
 é um salto só (retemporização + distância em linha reta); a peça grande assume que
 os saltos dentro da própria peça não custam nada (rede interna da GPU, premissa).
 """
@@ -20,7 +25,9 @@ from dataclasses import replace
 
 from modulos.conexoes.netlist import Netlist
 from modulos.conexoes.verificador import verificar
+from modulos.malha import custo
 from modulos.malha import montar as MO
+from modulos.malha import parametros
 from modulos.malha.rota import rota_xy
 from modulos.malha.topologia import ligacao
 from modulos.malha.trafego import Fluxo
@@ -30,14 +37,14 @@ PECA_GRANDE = "GPU"          # peça que ocupa vários segmentos na alternativa 
 
 def _contagem_erros(av):
     rel = verificar(Netlist(), {"malha": av})
-    return rel.contagem("R21-malha-atraso"), rel.contagem("R22-malha-ocupacao")
+    return tuple(rel.contagem(r) for r in ("R21-malha-atraso", "R22-malha-ocupacao",
+                                           "R23-malha-perda", "R24-malha-skew"))
 
 
 def _fechar(nome, descricao, fluxos, malha, extras):
     av = MO.avaliar_fluxos(fluxos, malha)
-    r21, r22 = _contagem_erros(av)
-    av["resumo"]["erros_r21"] = r21
-    av["resumo"]["erros_r22"] = r22
+    r21, r22, r23, r24 = _contagem_erros(av)
+    av["resumo"].update(erros_r21=r21, erros_r22=r22, erros_r23=r23, erros_r24=r24)
     gm = [d for d in av["fluxos"] if d["nome"].startswith("GPU-MEM")]
     if gm:
         extras["gpu_mem_saltos_max"] = max(d["saltos"] for d in gm)
@@ -94,9 +101,9 @@ def _colar(itens, malha, caixa):
 
 
 def montar_fluxos(plano, base, *, expressas=False, peca_grande=False, espalhar=False,
-                  colada=False, min_saltos=2, gbs_expressa=None):
+                  colada=False, min_saltos=2, gbs_expressa=None, chave=False, params=None):
     """Devolve (fluxos, malha, extras) do cenário pedido, ainda sem reservar."""
-    malha = MO.malha_da_base(base)
+    malha = MO.malha_da_base(base, params=params, tipo_salto="chave" if chave else "retransmite")
     itens = _pontas(plano, malha)
     caixa = _caixa(plano, malha, PECA_GRANDE)
     extras = {}
@@ -147,10 +154,16 @@ def _alargar(fluxos, malha):
 
 
 def combinar(plano, base, *, nome, descricao="", expressas=False, peca_grande=False,
-             largas=False, espalhar=False, colada=False, min_saltos=2, gbs_expressa=None):
+             largas=False, espalhar=False, colada=False, min_saltos=2, gbs_expressa=None,
+             chave=False, params=None):
     fluxos, malha, extras = montar_fluxos(
         plano, base, expressas=expressas, peca_grande=peca_grande, espalhar=espalhar,
-        colada=colada, min_saltos=min_saltos, gbs_expressa=gbs_expressa)
+        colada=colada, min_saltos=min_saltos, gbs_expressa=gbs_expressa, chave=chave,
+        params=params)
+    if chave:
+        p = malha.params
+        extras["chave_n"] = {proto: custo.saltos_ate_retemporizar(malha.passo_mm, proto, p)
+                             for proto in sorted({f.protocolo for f in fluxos if f.protocolo})}
     if largas:
         malha, ex = _alargar(fluxos, malha)
         extras.update(ex)
@@ -191,6 +204,12 @@ def memoria_colada(plano, base):
                     descricao="chip vizinho do tradutor da GPU (referência)")
 
 
+def salto_chave(plano, base, params=None):
+    """5. Salto que não retransmite: chave analógica, retimer só quando a perda pede."""
+    return combinar(plano, base, chave=True, params=params, nome="5. Salto por chave",
+                    descricao="chave analógica por salto (estimativa); retimer a cada N segmentos pela perda do cobre")
+
+
 COMBINACOES = [
     dict(nome="Peça grande", peca_grande=True,
          descricao="só a GPU em vários segmentos"),
@@ -204,6 +223,12 @@ COMBINACOES = [
          largas=True, descricao="as três juntas"),
     dict(nome="Colada + espalhadas + largas", colada=True, espalhar=True, largas=True,
          descricao="referência com a sobra ajustada"),
+    dict(nome="Chave + largas", chave=True, largas=True,
+         descricao="salto por chave e capacidade ajustada"),
+    dict(nome="Chave + fibra gigante", chave=True, expressas=True,
+         descricao="salto por chave e expressas"),
+    dict(nome="Chave + fibra gigante + largas", chave=True, expressas=True, largas=True,
+         descricao="salto por chave, expressas e capacidade ajustada"),
 ]
 
 
@@ -211,6 +236,12 @@ def todos(plano, base):
     """Todas as linhas da comparação, na ordem da tabela."""
     saida = [atual(plano, base), fibra_gigante(plano, base),
              ligacoes_largas(plano, base), ligacoes_largas(plano, base, peca_grande=True),
-             rotas_espalhadas(plano, base), memoria_colada(plano, base)]
+             rotas_espalhadas(plano, base), memoria_colada(plano, base), salto_chave(plano, base)]
     saida += [combinar(plano, base, **c) for c in COMBINACOES]
+    fr4 = parametros.carregar(material="fr4")        # cobre de mais perda: o retimer passa a entrar
+    saida += [combinar(plano, base, nome="Chave em FR4", chave=True, params=fr4,
+                       descricao="salto por chave com laminado FR4 (0,06 dB/mm): o retimer entra a cada N segmentos"),
+              combinar(plano, base, nome="Chave em FR4 + fibra gigante + largas", chave=True, expressas=True,
+                       largas=True, params=fr4,
+                       descricao="idem, com expressas (125 mm de FR4 = 7,5 dB) e capacidade ajustada")]
     return saida

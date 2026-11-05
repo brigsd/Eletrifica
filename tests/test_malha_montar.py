@@ -5,6 +5,7 @@ from modulos.conexoes.netlist import Netlist
 from modulos.conexoes.verificador import verificar
 from modulos.dados.roteamento import Canal, Enlace, Plano
 from modulos.malha import montar as MO
+from modulos.malha.parametros import FALLBACK as FIXOS
 from modulos.sistema import base as B
 
 
@@ -35,7 +36,7 @@ def _verificar_malha(malha):
 
 # ----------------------------------------------------------- rápidos
 def test_malha_da_base_cobre_a_base_inteira():
-    m = MO.malha_da_base(_base())
+    m = MO.malha_da_base(_base(), params=FIXOS)
     # 320 / 25 = 12,8 -> 13 colunas; 240 / 25 = 9,6 -> 10 linhas
     assert (m.colunas, m.linhas) == (13, 10)
     assert m.passo_mm == MO.MALHA_PASSO_MM
@@ -44,20 +45,20 @@ def test_malha_da_base_cobre_a_base_inteira():
 
 
 def test_orcamento_por_protocolo():
-    assert MO.orcamento_ns("GDDR7-32") == 10.0
-    assert MO.orcamento_ns("DDR5-4800") == 15.0
-    assert MO.orcamento_ns("PCIe5") == 100.0
-    assert MO.orcamento_ns("AUX") == MO.ORCAMENTO_PADRAO_NS == 20.0
+    assert MO.orcamento_ns("GDDR7-32", FIXOS) == 10.0
+    assert MO.orcamento_ns("DDR5-4800", FIXOS) == 15.0
+    assert MO.orcamento_ns("PCIe5", FIXOS) == 100.0
+    assert MO.orcamento_ns("AUX", FIXOS) == MO.ORCAMENTO_PADRAO_NS == 20.0
 
 
 def test_segmento_de_ponto_fora_da_base_falha():
-    m = MO.malha_da_base(_base())
+    m = MO.malha_da_base(_base(), params=FIXOS)
     with pytest.raises(ValueError):
         MO.segmento_de(m, (400.0, 10.0))
 
 
 def test_fluxos_do_plano_somam_taxa_dos_canais_em_gbs():
-    m = MO.malha_da_base(_base())
+    m = MO.malha_da_base(_base(), params=FIXOS)
     plano = _plano([("E1", "GDDR7-32", (0, 0), (1, 0), [16.0, 16.0, 16.0, 16.0])])
     (f,) = MO.fluxos_do_plano(plano, m)
     assert f.nome == "E1"
@@ -77,7 +78,7 @@ def test_avaliar_sem_erro_quando_cabe_e_chega_no_prazo():
         ("PERTO", "GDDR7-32", (0, 0), (1, 0), [32.0] * 4),      # 1 salto
         ("MEIO", "DDR5-4800", (0, 1), (3, 1), [32.0] * 4),      # 3 saltos
     ])
-    r = MO.avaliar(plano, b)
+    r = MO.avaliar(plano, b, params=FIXOS)
     assert r["fora_do_orcamento"] == []
     assert r["acima_de_100"] == []
     assert r["resumo"]["saltos_max"] == 3
@@ -94,7 +95,7 @@ def test_r21_erro_quando_o_atraso_passa_do_orcamento_gddr7():
         ("CINCO", "GDDR7-32", (0, 0), (5, 0), [32.0] * 4),
         ("SEIS", "GDDR7-32", (0, 1), (6, 1), [32.0] * 4),
     ])
-    r = MO.avaliar(plano, b)
+    r = MO.avaliar(plano, b, params=FIXOS)
     assert [d["nome"] for d in r["fora_do_orcamento"]] == ["SEIS"]
     rel = _verificar_malha(r)
     assert rel.contagem("R21-malha-atraso") == 1
@@ -105,7 +106,7 @@ def test_r21_erro_quando_o_atraso_passa_do_orcamento_gddr7():
 def test_r22_erro_quando_a_ligacao_passa_da_capacidade():
     # 1 faixa de 8 Gb/s = 1 GB/s por ligação; o fluxo leva 2 GB/s (16 Gb/s) num salto só
     b = _base()
-    m = MO.malha_da_base(b, faixas=1, gbps=8.0)
+    m = MO.malha_da_base(b, faixas=1, gbps=8.0, params=FIXOS)
     plano = _plano([("CHEIO", "PCIe5", (0, 0), (1, 0), [16.0])])
     r = MO.avaliar(plano, b, malha=m)
     assert len(r["acima_de_100"]) == 1

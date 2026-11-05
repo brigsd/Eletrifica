@@ -82,6 +82,13 @@
     "PCIe4": 18.75
   },
   "_fonte_skew_max_ps": "residual DEPOIS do treino de deskew por bit, convencao 10 % UI (memoria) e 30 % UI (PCIe) ja usada em modulos/dados/protocolos.py; estimativa, nao e numero de datasheet. O ps da linha de atraso por bit depende do PHY (nao achei publico): https://hsiolab.pages.dev/ddr/validation/high-speed/",
+  "salto_chave_ns": 0.15,
+  "_fonte_salto_chave_ns": "estimativa: SEM FONTE. Atraso de uma chave analogica (salto que so desvia o sinal, sem retemporizar); ordem de grandeza de multiplexador RF/mux de alta velocidade, nao medido nem de datasheet",
+  "salto_chave_pj_por_bit": 0.3,
+  "_fonte_salto_chave_pj_por_bit": "estimativa: SEM FONTE. Energia por bit do salto por chave (so aciona a chave e carrega o cobre); a medir",
+  "orcamento_perda_trecho_db": 16.0,
+  "_fonte_orcamento_perda_trecho_db": "PCIe 5: parcela da placa-base = 16 dB a 16 GHz (https://www.asteralabs.com/?p=18375). Usada como referencia para TODOS os protocolos; para GDDR7 e DDR5 e estimativa (nao ha orcamento publico). Um trecho = cobre entre duas retemporizacoes",
+
   "skew_treinavel_ps": {
     "DDR5-4800": 208.0,
     "GDDR7-32": null,

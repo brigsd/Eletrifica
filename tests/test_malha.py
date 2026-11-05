@@ -2,6 +2,7 @@
 import pytest
 
 from modulos.malha import custo
+from modulos.malha.parametros import FALLBACK as FIXOS   # valores fixos: o teste não depende do malha.json
 from modulos.malha.rota import rota_xy
 from modulos.malha.topologia import Malha, ligacao
 from modulos.malha.trafego import Fluxo, reservar
@@ -10,7 +11,7 @@ from modulos.malha.trafego import Fluxo, reservar
 @pytest.fixture
 def malha3():
     # 3x3, 1 faixa de 16 Gb/s: capacidade de cada ligação = 2 GB/s
-    return Malha(colunas=3, linhas=3, passo_mm=10.0, faixas_por_ligacao=1, gbps_por_faixa=16.0)
+    return Malha(colunas=3, linhas=3, passo_mm=10.0, faixas_por_ligacao=1, gbps_por_faixa=16.0, params=FIXOS)
 
 
 def test_rota_xy_anda_primeiro_x_depois_y(malha3):
@@ -60,7 +61,7 @@ def test_capacidade_de_ligacao_inexistente_falha(malha3):
 
 def test_atraso_dentro_e_fora_do_orcamento():
     # passo 10 mm: 1,5 + 10 × 7 ps/mm = 1,57 ns por salto; 3 saltos = 4,71 ns
-    atraso = custo.atraso_caminho_ns(3, 10.0)
+    atraso = custo.atraso_caminho_ns(3, 10.0, FIXOS)
     assert atraso == pytest.approx(4.71)
     cabe, folga = custo.conferir_orcamento(atraso, 5.0)
     assert cabe and folga == pytest.approx(0.29)
@@ -69,8 +70,8 @@ def test_atraso_dentro_e_fora_do_orcamento():
 
 
 def test_energia_por_bit_cresce_com_saltos():
-    assert custo.energia_pj_por_bit(0) == 0.0
-    assert custo.energia_pj_por_bit(3) == pytest.approx(6.0)
+    assert custo.energia_pj_por_bit(0, FIXOS) == 0.0
+    assert custo.energia_pj_por_bit(3, FIXOS) == pytest.approx(6.0)
 
 
 def test_fluxos_pequenos_cabem(malha3):

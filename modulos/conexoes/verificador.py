@@ -20,7 +20,8 @@ REGRAS = ("R01-caminho", "R02-sentido", "R03-padrao", "R04-banda", "R05-optico",
           "R06-energia", "R07-controle", "R08-capacidade", "R09-tempo", "R10-relogio",
           "R11-requisito", "R12-orfao", "R13-temperatura", "R14-consumo",
           "R15-decodificacao", "R16-ajuste", "R17-pcie", "R18-memoria-compartilhada",
-          "R19-posse", "R20-banco", "R21-malha-atraso", "R22-malha-ocupacao")
+          "R19-posse", "R20-banco", "R21-malha-atraso", "R22-malha-ocupacao",
+          "R23-malha-perda", "R24-malha-skew")
 
 # capacidades que melhoram o sistema mas não impedem o boot (R18 avisa)
 OPCIONAIS = {"memoria-compartilhada"}
@@ -1351,6 +1352,29 @@ def _r22(net, rel, contexto):
                                       f"ligação {lig[0]}-{lig[1]} com {ocup * 100:.0f} % da capacidade"))
 
 
+def _r23(net, rel, contexto):
+    R = "R23-malha-perda"
+    malha = (contexto or {}).get("malha")
+    if not malha:
+        return
+    for f in malha.get("fora_da_perda", []):
+        rel.violacoes.append(Violacao(R, "erro", f["nome"],
+                                      f"{f['nome']} ({f['protocolo']}): {f['trecho_db']:.1f} dB entre retemporizações "
+                                      f"> orçamento {f['orcamento_perda_db']:.0f} dB"))
+
+
+def _r24(net, rel, contexto):
+    R = "R24-malha-skew"
+    malha = (contexto or {}).get("malha")
+    if not malha:
+        return
+    for f in malha.get("fora_do_skew", []):
+        rel.violacoes.append(Violacao(R, "erro", f["nome"],
+                                      f"{f['nome']} ({f['protocolo']}): as faixas do fluxo chegam com "
+                                      f"{f['desalinhamento_ps']:.1f} ps de diferença > limite "
+                                      f"{f['limite_skew_ps']:.1f} ps"))
+
+
 def verificar(netlist, contexto=None):
     """Roda as regras e devolve um Relatorio."""
     rel = Relatorio()
@@ -1378,4 +1402,6 @@ def verificar(netlist, contexto=None):
     _r20(netlist, rel)
     _r21(netlist, rel, contexto)
     _r22(netlist, rel, contexto)
+    _r23(netlist, rel, contexto)
+    _r24(netlist, rel, contexto)
     return rel
