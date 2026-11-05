@@ -8,7 +8,7 @@ reserva não cabe e o circuito não fecha.
 from dataclasses import dataclass, field
 
 from modulos.malha import custo
-from modulos.malha.rota import rota_xy
+from modulos.malha.rota import caminhos, rota_com_expressa
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,8 @@ class Fluxo:
     destino: tuple
     gbs: float                   # GB/s reservados
     protocolo: str = ""          # protocolo nativo do enlace (opcional)
+    rota: str = "xy"             # "xy", "yx" ou "dividida" (XY e YX meio a meio)
+    expressa: tuple = None       # ligação expressa que o fluxo usa (opcional)
 
 
 @dataclass
@@ -44,14 +46,25 @@ class Reserva:
 
 def reservar(malha, fluxos):
     """Reserva os fluxos nas rotas fixas da malha e devolve a ocupação e o custo."""
-    carga = {lig: 0.0 for lig in malha.ligacoes()}
+    carga = {lig: 0.0 for lig in malha.todas_ligacoes()}
     resultados = []
     for f in fluxos:
         if f.gbs < 0:
             raise ValueError(f"fluxo {f.nome}: banda negativa")
-        ligs, saltos = rota_xy(malha, f.origem, f.destino)
-        for lig in ligs:
-            carga[lig] += f.gbs
+        if f.expressa is not None:
+            partes = rota_com_expressa(malha, f.origem, f.destino, f.expressa, f.rota)
+        else:
+            partes = caminhos(malha, f.origem, f.destino, f.rota)
+        ligs, saltos, atraso = [], 0, 0.0
+        for caminho, frac in partes:
+            for lig in caminho:
+                carga[lig] += f.gbs * frac
+                if lig not in ligs:
+                    ligs.append(lig)
+            # cada ligação é um salto; a expressa é um salto só, com a distância dela
+            saltos = max(saltos, len(caminho))
+            atraso = max(atraso, sum(
+                custo.atraso_ligacao_ns(malha.comprimento_mm(lig)) for lig in caminho))
         pj = custo.energia_pj_por_bit(saltos)
         # GB/s × 8e9 bit/s × pJ/bit × 1e-12 J/pJ = W
         potencia = f.gbs * 8e9 * pj * 1e-12
@@ -59,7 +72,7 @@ def reservar(malha, fluxos):
             nome=f.nome,
             ligacoes=ligs,
             saltos=saltos,
-            atraso_ns=custo.atraso_caminho_ns(saltos, malha.passo_mm),
+            atraso_ns=atraso,
             energia_pj_bit=pj,
             potencia_w=potencia,
         ))

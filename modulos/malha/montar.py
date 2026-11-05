@@ -69,7 +69,11 @@ def avaliar(plano, base, malha=None):
     entradas que o verificador usa nas regras R21 e R22.
     """
     malha = malha or malha_da_base(base)
-    fluxos = fluxos_do_plano(plano, malha)
+    return avaliar_fluxos(fluxos_do_plano(plano, malha), malha)
+
+
+def avaliar_fluxos(fluxos, malha):
+    """Como `avaliar`, mas com os fluxos já montados (cenários alternativos)."""
     reserva = reservar(malha, fluxos)
 
     detalhes = []

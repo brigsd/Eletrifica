@@ -16,6 +16,11 @@ def atraso_salto_ns(passo_mm):
     return RETEMPORIZACAO_NS + passo_mm * PS_POR_MM / 1000.0
 
 
+def atraso_ligacao_ns(comprimento_mm):
+    """Atraso de UM salto por uma ligação de `comprimento_mm` (expressa: um tradutor + a distância)."""
+    return RETEMPORIZACAO_NS + comprimento_mm * PS_POR_MM / 1000.0
+
+
 def atraso_caminho_ns(saltos, passo_mm):
     """Atraso determinístico de um caminho de `saltos` ligações, em ns."""
     return saltos * atraso_salto_ns(passo_mm)

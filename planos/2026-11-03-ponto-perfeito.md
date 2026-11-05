@@ -87,3 +87,14 @@ Falta para a minhoca:
   11,7 ns contra 10 da GDDR7 (8 erros R21), ligações junto à GPU e à ponte a até
   900 % (29 erros R22), 269 W. Causa: os 12 enlaces de memória (~136 GB/s cada)
   convergem na GPU e a rota XY empilha todos nas mesmas ligações.
+- 2026-11-05 — Parâmetros com fonte em `malha.json` (`docs/malha-parametros.md`).
+  Ciclo 3, problema: retemporização real ~5 ns por salto e folga da memória ~5 ns
+  (GDDR7 sem fonte pública): a memória só aguenta 1 salto. Alternativas: retimer de
+  chiplet (UCIe, ~2 ns, só curto alcance); **salto que não retransmite** (chave
+  analógica, ~0,1–0,2 ns; o cobre perde só ~0,5 dB a cada 25 mm, então regenerar
+  só a cada vários segmentos). A medir.
+- 2026-11-05 — As quatro alternativas do ciclo 2 no modelo (`modulos/malha/cenarios.py`,
+  `python3 -m modulos.malha.comparar` → `docs/malha-alternativas.md`), ainda com os
+  custos antigos. Só a fibra gigante mexe no atraso; fibra gigante + ligações largas
+  zera R21 e R22 (1 salto, 2,4 ns, 83 W, 53 %). O pior atraso vem da PONTE-MEM, não da
+  GPU-MEM.
